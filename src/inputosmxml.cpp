@@ -1,4 +1,4 @@
-#include "slimosm.h"
+#include "inputosm.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

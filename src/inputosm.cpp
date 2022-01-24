@@ -1,4 +1,4 @@
-#include "slimosm.h"
+#include "inputosm.h"
 #include <cstring>
 
 namespace slim_osm {

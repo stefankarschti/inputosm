@@ -1,5 +1,5 @@
-#ifndef SLIMOSM_H
-#define SLIMOSM_H
+#ifndef INPUTOSM_H
+#define INPUTOSM_H
 
 #include <cstdint>
 #include <functional>
@@ -81,4 +81,4 @@ bool input_file(const char* filename,
 
 } // namespace
 
-#endif // !SLIMOSM_H
+#endif // !INPUTOSM_H

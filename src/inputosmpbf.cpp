@@ -1,4 +1,4 @@
-#include "slimosm.h"
+#include "inputosm.h"
 #include <functional>
 #include <vector>
 #include <zlib.h>

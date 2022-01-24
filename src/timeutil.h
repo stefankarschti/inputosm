@@ -1,5 +1,5 @@
-#ifndef _TIME_UTIL_H_
-#define _TIME_UTIL_H_
+#ifndef _TIMEUTIL_H_
+#define _TIMEUTIL_H_
 
 #include <ctime>
 #include <string>
@@ -13,4 +13,4 @@ time_t str_to_timestamp_osmstate(const char* str);
 std::string timestamp_to_str(const time_t rawtime);
 std::string duration_to_str(int64_t nano);
 
-#endif
+#endif // _TIMEUTIL_H_
