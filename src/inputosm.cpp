@@ -1,7 +1,20 @@
+// Copyright 2021-2022 Stefan Karschti
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "inputosm.h"
 #include <cstring>
 
-namespace slim_osm {
+namespace input_osm {
 
 bool decode_metadata;
 bool decode_node_coord;
@@ -20,11 +33,11 @@ bool input_file(const char* filename,
                 std::function<bool(const way_t&)> way_handler,
                 std::function<bool(const relation_t&)> relation_handler)
 {
-    slim_osm::decode_metadata = decode_metadata;
-    slim_osm::decode_node_coord = decode_node_coord;
-    slim_osm::node_handler = node_handler;
-    slim_osm::way_handler = way_handler;
-    slim_osm::relation_handler = relation_handler;
+    input_osm::decode_metadata = decode_metadata;
+    input_osm::decode_node_coord = decode_node_coord;
+    input_osm::node_handler = node_handler;
+    input_osm::way_handler = way_handler;
+    input_osm::relation_handler = relation_handler;
     osc_mode = mode_t::bulk;
     bool result = false;
 
