@@ -81,8 +81,7 @@ xml_end_node()
 {
     // node end
     current_tag = current_tag_t::none;
-    current_node.tags = current_tags.data();
-    current_node.tag_count = current_tags.size();
+    current_node.tags = {current_tags.data(), current_tags.size() };
     if(parser_enabled && node_handler)
         parser_enabled = node_handler(current_node);
     current_tags.clear();
@@ -113,10 +112,8 @@ xml_end_way()
 {
     // way end
     current_tag = current_tag_t::none;
-    current_way.tags = current_tags.data();
-    current_way.tag_count = current_tags.size();
-    current_way.node_ref_count = current_refs.size();
-    current_way.node_refs = current_refs.data();
+    current_way.tags = { current_tags.data(), current_tags.size()};
+    current_way.node_refs = {current_refs.data(), current_refs.size()};
     if(parser_enabled && way_handler)
         parser_enabled = way_handler(current_way);
     current_tags.clear();
@@ -148,10 +145,8 @@ xml_end_relation()
 {
     // end relation
     current_tag = current_tag_t::none;
-    current_relation.tags = current_tags.data();
-    current_relation.tag_count = current_tags.size();
-    current_relation.member_count = current_members.size();
-    current_relation.members = current_members.data();
+    current_relation.tags = { current_tags.data(), current_tags.size() };
+    current_relation.members = { current_members.data(), current_members.size() };
     if(parser_enabled && relation_handler)
         parser_enabled = relation_handler(current_relation);
     current_tags.clear();
