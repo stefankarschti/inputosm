@@ -34,9 +34,9 @@ bool input_file(const char* filename,
                 std::function<bool(const way_t&)> way_handler,
                 std::function<bool(const relation_t&)> relation_handler)
 {
-    input_osm::decode_metadata = decode_metadata;
-    input_osm::decode_node_coord = decode_node_coord;
-    input_osm::node_handler = node_handler;
+    input_osm::decode_metadata = std::move(decode_metadata);
+    input_osm::decode_node_coord = std::move(decode_node_coord);
+    input_osm::node_handler = std::move(node_handler);
     input_osm::way_handler = way_handler;
     input_osm::relation_handler = relation_handler;
     osc_mode = mode_t::bulk;
