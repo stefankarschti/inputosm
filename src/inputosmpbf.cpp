@@ -21,6 +21,7 @@ namespace input_osm {
 
 #define IDWT(id, wt) ((id<<3)|(wt&3))
 extern bool decode_metadata, decode_node_coord;
+
 extern std::function<bool(const node_t&)> node_handler;
 extern std::function<bool(const way_t&)> way_handler;
 extern std::function<bool(const relation_t&)> relation_handler;
@@ -163,7 +164,8 @@ static void read_uint32_packed(std::vector<uint32_t>& packed, uint8_t* ptr, uint
         packed.emplace_back(read_varint_uint64(ptr));
 }
 
-static bool iterate_fields(uint8_t* ptr, uint8_t* end, std::function<bool(field_t&)> handler)
+template <typename Handler>
+static bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
 {
     while(ptr < end)
     {
