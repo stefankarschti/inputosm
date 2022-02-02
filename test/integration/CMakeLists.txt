@@ -1,0 +1,4 @@
+project(inputosm_integration_tests)
+
+add_executable(inputosm_integration_test inputosm_integration_test.cpp)
+target_link_libraries(inputosm_integration_test PRIVATE inputosm::inputosm)
