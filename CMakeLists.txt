@@ -61,7 +61,7 @@ configure_file(${${LIBRARY_NAME}_CMAKE_DIR}/version.h.in
 configure_file(${${LIBRARY_NAME}_CMAKE_DIR}/${LIBRARY_NAME}.pc.in
     ${${LIBRARY_NAME}_GENERATED_PATH}/${LIBRARY_NAME}.pc @ONLY)
 
-# Imstall actual files
+# Install actual files
 install(
     DIRECTORY 
         include/${LIBRARY_NAME}
