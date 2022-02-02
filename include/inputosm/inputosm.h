@@ -52,6 +52,10 @@ struct way_t
 
 struct relation_member_t
 {
+    /**
+     * @brief Relation type
+     * @details NODE = 0; WAY = 1; RELATION = 2;
+     */
     uint8_t type = 0;
     int64_t id = 0;
     const char* role = nullptr;

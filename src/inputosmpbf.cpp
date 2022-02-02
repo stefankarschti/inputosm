@@ -19,6 +19,12 @@
 
 namespace input_osm {
 
+/**
+ * @brief 
+ * @link https://wiki.openstreetmap.org/wiki/PBF_Format @endlink
+ * @link https://developers.google.com/protocol-buffers/docs/encoding#structure @endlink
+ */
+
 #define IDWT(id, wt) ((id<<3)|(wt&3))
 extern bool decode_metadata, decode_node_coord;
 extern std::function<bool(const node_t&)> node_handler;
