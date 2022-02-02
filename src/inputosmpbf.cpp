@@ -292,8 +292,8 @@ static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t
                     pkey = pval = nullptr;
                 }
             }
-            node.tag_count = tags.size();
-            node.tags = tags.data();
+
+            node.tags = {tags.data(), tags.size() };
 
             // infos
             if(decode_metadata)
@@ -377,17 +377,15 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
         {
             current += n;
             n = current;
-        }
-        way.node_ref_count = node_id.size();
-        way.node_refs = node_id.data();
+        } 
+        way.node_refs = { node_id.data(), node_id.size() };
         static std::vector<tag_t> tags;
         tags.clear();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
-        way.tag_count = tags.size();
-        way.tags = tags.data();
+        way.tags = { tags.data(), tags.size() };
 
         // report this way
         if(way_handler)
@@ -454,8 +452,7 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
-        relation.tag_count = tags.size();
-        relation.tags = tags.data();
+        relation.tags = { tags.data(), tags.size() };
         static std::vector<relation_member_t> members;
         members.clear();
         int64_t current = 0;
@@ -468,8 +465,7 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
             mem.type = member_type[i];
             members.emplace_back(mem);
         }
-        relation.member_count = members.size();
-        relation.members = members.data();
+        relation.members = { members.data(), members.size() };
 
         // report this relation
         if(relation_handler)

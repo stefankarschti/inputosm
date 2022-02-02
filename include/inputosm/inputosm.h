@@ -14,6 +14,8 @@
 #ifndef INPUTOSM_H
 #define INPUTOSM_H
 
+#include "span.h"
+
 #include <cstdint>
 #include <functional>
 
@@ -31,8 +33,7 @@ struct node_t
     int64_t raw_longitude = 0;
     double longitude = 0;
     double latitude = 0;
-    size_t tag_count = 0;
-    tag_t *tags = nullptr;
+    span_t<tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
@@ -41,10 +42,8 @@ struct node_t
 struct way_t
 {
     int64_t id = 0;
-    size_t node_ref_count = 0;
-    int64_t *node_refs = nullptr;
-    size_t tag_count = 0;
-    tag_t *tags = nullptr;
+    span_t<int64_t> node_refs;
+    span_t<tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
@@ -64,10 +63,8 @@ struct relation_member_t
 struct relation_t
 {
     int64_t id = 0;
-    size_t member_count = 0;
-    relation_member_t *members = nullptr;
-    size_t tag_count = 0;
-    tag_t *tags = nullptr;
+    span_t<relation_member_t> members;
+    span_t<tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
