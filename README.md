@@ -1,29 +1,56 @@
 # README #
 
-This README would normally document whatever steps are necessary to get your application up and running.
-
-### What is this repository for? ###
-
-* Quick summary
-* Version
-* [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
+Read OSM files.
 
 ### How do I get set up? ###
 
 * Summary of set up
-* Configuration
+
+    Install:
+    1) cmake > 3.5
+    2) make (or another build system, like ninja)
+    3) c++17 compiler
+
+
 * Dependencies
-* Database configuration
+
+    This library depends on EXPAT and ZLIB
+
+
+* Configuration
+
+    Run:
+    ```sh
+    # linux
+    cmake -S. -Bbuild && cmake --build build --target all --parallel $(nproc)
+    # mac
+    # cmake -S. -Bbuild && cmake --build build --target all --parallel $(sysctl -n hw.ncpu)
+    ```
+
+
 * How to run tests
+
+    Enable tests by doing:
+
+    ```sh
+    # linux
+    cmake -S. -Bbuild -DINPUTOSM_INTEGRATION_TESTS=ON
+    ```
+
 * Deployment instructions
+
+    Install the library with:
+
+    ```sh
+    cmake -S. -Bbuild && cmake --build build --target install
+    ```
 
 ### Contribution guidelines ###
 
 * Writing tests
-* Code review
-* Other guidelines
+
+    Add tests in the tests folder.
 
 ### Who do I talk to? ###
 
-* Repo owner or admin
-* Other community or team contact
+    Stefan Karschti

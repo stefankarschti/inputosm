@@ -11,7 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "inputosm.h"
+#include <inputosm/inputosm.h>
+
 #include <cstring>
 
 namespace input_osm {

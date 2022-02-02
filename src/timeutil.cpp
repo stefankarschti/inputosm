@@ -26,12 +26,6 @@ int64_t now_us()
     return duration_cast<microseconds>(system_clock::now().time_since_epoch()).count();
 }
 
-int64_t time_ns()
-{
-    using namespace std::chrono;
-    return duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-}
-
 time_t str_to_timestamp(const char* str)
 {
     struct tm timeinfo;
