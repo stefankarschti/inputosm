@@ -17,6 +17,13 @@
 #include <vector>
 #include <zlib.h>
 
+static constexpr uint8_t ID5WT3(uint8_t id, uint8_t wt)
+{
+    constexpr uint8_t kBitsForWT = 3u;
+    constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT);
+    return (id << kBitsForWT) | (wt & kMaskForWT);
+}
+
 namespace input_osm {
 
 /**
@@ -25,7 +32,6 @@ namespace input_osm {
  * @link https://developers.google.com/protocol-buffers/docs/encoding#structure @endlink
  */
 
-#define IDWT(id, wt) ((id<<3)|(wt&3))
 extern bool decode_metadata, decode_node_coord;
 
 extern std::function<bool(const node_t&)> node_handler;
@@ -188,10 +194,10 @@ static bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
 static bool read_string_table(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
-        if(field.id5wt3 == IDWT(1, 2)) // string
+        if(field.id5wt3 == ID5WT3(1, 2)) // string
             string_table.add(field.pointer, field.length);
         return true;
-    });
+    }); 
 }
 
 static bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* end)
@@ -199,13 +205,13 @@ static bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* en
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,2): // versions. not delta encoded
+        case ID5WT3(1,2): // versions. not delta encoded
             read_uint32_packed(node_infos.version, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(2,2): // timestamps. delta encoded
+        case ID5WT3(2,2): // timestamps. delta encoded
             read_sint64_packed(node_infos.timestamp, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(3,2): // changesets. delta encoded
+        case ID5WT3(3,2): // changesets. delta encoded
             read_sint64_packed(node_infos.changeset, field.pointer, field.pointer + field.length);
             break;
         }
@@ -228,20 +234,20 @@ static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,2): // node ids
+        case ID5WT3(1,2): // node ids
             read_sint64_packed(node_id, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(5,2): // dense infos
+        case ID5WT3(5,2): // dense infos
             if(decode_metadata)
                 read_dense_infos(node_infos, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(8,2): // latitudes
+        case ID5WT3(8,2): // latitudes
             read_sint64_packed(latitude, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(9,2): // longitudes
+        case ID5WT3(9,2): // longitudes
             read_sint64_packed(longitude, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(10,2): // packed indexes to keys & values
+        case ID5WT3(10,2): // packed indexes to keys & values
             read_uint32_packed(itags, field.pointer, field.pointer + field.length);
             break;
         }
@@ -320,13 +326,13 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,0): // version
+        case ID5WT3(1,0): // version
             obj.version = field.value_uint64;
             break;
-        case IDWT(2,0): // timestamp
+        case ID5WT3(2,0): // timestamp
             obj.timestamp = field.value_uint64;
             break;
-        case IDWT(3,0): // changeset
+        case ID5WT3(3,0): // changeset
             obj.changeset = field.value_uint64;
             break;
         }
@@ -347,20 +353,20 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,0): // way id
+        case ID5WT3(1,0): // way id
             way.id = field.value_uint64;
             break;
-        case IDWT(2,2): // packed keys
+        case ID5WT3(2,2): // packed keys
             read_uint32_packed(ikey, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(3,2): // packed values
+        case ID5WT3(3,2): // packed values
             read_uint32_packed(ivalue, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(4,2): // way info
+        case ID5WT3(4,2): // way info
             if(decode_metadata)
                 read_info<way_t>(way, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(8,2): // node ids
+        case ID5WT3(8,2): // node ids
             read_sint64_packed(node_id, field.pointer, field.pointer + field.length);
             break;
         }
@@ -413,26 +419,26 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,0): // relation id
+        case ID5WT3(1,0): // relation id
             relation.id = field.value_uint64;
             break;
-        case IDWT(2,2): // packed keys
+        case ID5WT3(2,2): // packed keys
             read_uint32_packed(ikey, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(3,2): // packed values
+        case ID5WT3(3,2): // packed values
             read_uint32_packed(ivalue, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(4,2): // relation info
+        case ID5WT3(4,2): // relation info
             if(decode_metadata)
                 read_info<relation_t>(relation, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(8,2): // member roles
+        case ID5WT3(8,2): // member roles
             read_uint32_packed(member_role, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(9,2): // member ids
+        case ID5WT3(9,2): // member ids
             read_sint64_packed(member_id, field.pointer, field.pointer + field.length);
             break;
-        case IDWT(10,2): // member types
+        case ID5WT3(10,2): // member types
             read_uint32_packed(member_type, field.pointer, field.pointer + field.length);
             break;
         }
@@ -501,10 +507,10 @@ static bool input_blob(FILE* file, uint32_t header_size, const char* expected_ty
     iterate_fields(buf, buf + header_size, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,2): // type
+        case ID5WT3(1,2): // type
             expected_header_found = (field.length == expected_type_len) && (memcmp(field.pointer, expected_type, expected_type_len) == 0);
             break;
-        case IDWT(3,0): // datasize
+        case ID5WT3(3,0): // datasize
             blob_size = field.value_uint64;
             break;
         }
@@ -527,15 +533,15 @@ static bool input_blob(FILE* file, uint32_t header_size, const char* expected_ty
     iterate_fields(buf, buf + blob_size, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,2): // raw
+        case ID5WT3(1,2): // raw
             raw_size = field.length;
             raw_ptr = alloc(buffer2, raw_size);
             memcpy(raw_ptr, field.pointer, raw_size);
             break;
-        case IDWT(2,0): // raw size
+        case ID5WT3(2,0): // raw size
             raw_size = field.value_uint64;
             break;
-        case IDWT(3,2): // zlib_data
+        case ID5WT3(3,2): // zlib_data
             zip_sz = field.length;
             zip_ptr = field.pointer;
             break;
@@ -564,23 +570,23 @@ static bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uin
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,2): // node
+        case ID5WT3(1,2): // node
             break;
-        case IDWT(2,2): // dense nodes
+        case ID5WT3(2,2): // dense nodes
             if(node_handler)
             {
                 if(!read_dense_nodes(string_table, field.pointer, field.pointer + field.length))
                     return false;
             }
             break;
-        case IDWT(3,2): // way
+        case ID5WT3(3,2): // way
             if(way_handler)
             {
                 if(!read_way(string_table, field.pointer, field.pointer + field.length))
                     return false;
             }
             break;
-        case IDWT(4,2): // relation
+        case ID5WT3(4,2): // relation
             if(relation_handler)
             {
                 if(!read_relation(string_table, field.pointer, field.pointer + field.length))
@@ -600,21 +606,21 @@ static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case IDWT(1,2): // string table
+        case ID5WT3(1,2): // string table
             if(!read_string_table(string_table, field.pointer, field.pointer + field.length))
                 return false;
             break;
-        case IDWT(2,2): // primitive group
+        case ID5WT3(2,2): // primitive group
             if(!read_primitive_group(string_table, field.pointer, field.pointer + field.length))
                 return false;
             break;
-        case IDWT(17,0): // granularity in nanodegrees
+        case ID5WT3(17,0): // granularity in nanodegrees
             break;
-        case IDWT(18,0): // date granularity in milliseconds
+        case ID5WT3(18,0): // date granularity in milliseconds
             break;
-        case IDWT(19,0): // latitude offset in nanodegrees
+        case ID5WT3(19,0): // latitude offset in nanodegrees
             break;
-        case IDWT(20,0): // longitude offset in nanodegrees
+        case ID5WT3(20,0): // longitude offset in nanodegrees
             break;
         }
         return true;
@@ -663,5 +669,4 @@ bool input_pbf(const char* filename)
     return result;
 }
 
-#undef IDWT
 } // namespace
