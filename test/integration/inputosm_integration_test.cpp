@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
 
 int main(int argc, char **argv)
 {
@@ -9,23 +10,39 @@ int main(int argc, char **argv)
     {
         printf("Usage %s <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
-        //argv[1] = "/mnt/maps/romania-220123.osm.pbf";
     }
+
+    std::atomic<uint64_t> node_count{0};
+    std::atomic<uint64_t> way_count{0};
+    std::atomic<uint64_t> relation_count{0};
 
     if (!input_osm::input_file(
             argv[1],
             false,
             false,
-            [](const input_osm::node_t &) -> bool
-            { return true; },
-            [](const input_osm::way_t &) -> bool
-            { return true; },
-            [](const input_osm::relation_t &) -> bool
-            { return true; }))
+            [&node_count](const input_osm::node_t &) -> bool
+            { 
+                node_count++; 
+                return true; 
+            },
+            [&way_count](const input_osm::way_t &) -> bool
+            {
+                way_count++;
+                return true;
+            },
+            [&relation_count](const input_osm::relation_t &) -> bool
+            {
+                relation_count++;
+                return true;
+            }))
     {
         printf("Error while processing pbf\n");
         return EXIT_FAILURE;
     }
+
+    printf("%llu nodes\n", node_count.load());
+    printf("%llu ways\n", way_count.load());
+    printf("%llu relations\n", relation_count.load());
 
     return EXIT_SUCCESS;
 }
