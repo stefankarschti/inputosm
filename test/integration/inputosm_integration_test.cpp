@@ -9,6 +9,7 @@ int main(int argc, char **argv)
     {
         printf("Usage %s <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
+        //argv[1] = "/mnt/maps/romania-220123.osm.pbf";
     }
 
     if (!input_osm::input_file(

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 project(inputosm VERSION 0.2.0 LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Toggle integration tests
@@ -29,7 +31,6 @@ target_include_directories(${LIBRARY_NAME} PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB)
-target_compile_features(inputosm PUBLIC "cxx_std_17")
 
 # Tests
 if(INPUTOSM_INTEGRATION_TESTS)

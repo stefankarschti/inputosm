@@ -13,14 +13,16 @@
 
 #include <inputosm/inputosm.h>
 #include <cstring>
+#include <cstdio>
 #include <functional>
 #include <vector>
 #include <zlib.h>
+#include <thread>
 
 static constexpr uint8_t ID5WT3(uint8_t id, uint8_t wt)
 {
     constexpr uint8_t kBitsForWT = 3u;
-    constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT);
+    constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
     return (id << kBitsForWT) | (wt & kMaskForWT);
 }
 
@@ -61,8 +63,8 @@ struct field_t
 
 struct string_table_t
 {
-    static std::vector<size_t> st_index;
-    static std::vector<uint8_t> st_buffer;
+    std::vector<size_t> st_index;
+    std::vector<uint8_t> st_buffer;
 
     void init(size_t byte_size)
     {
@@ -83,8 +85,6 @@ struct string_table_t
         return (const char*)st_buffer.data() + st_index[index];
     }
 };
-std::vector<size_t> string_table_t::st_index;
-std::vector<uint8_t> string_table_t::st_buffer;
 
 uint32_t read_net_uint32(uint8_t *buf)
 {
@@ -221,15 +221,15 @@ static bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* en
 
 static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
-    static std::vector<int64_t> node_id;
+    std::vector<int64_t> node_id;
     node_id.clear();
-    static std::vector<int64_t> latitude;
+    std::vector<int64_t> latitude;
     latitude.clear();
-    static std::vector<int64_t> longitude;
+    std::vector<int64_t> longitude;
     longitude.clear();
-    static std::vector<uint32_t> itags;
+    std::vector<uint32_t> itags;
     itags.clear();
-    static dense_info_t node_infos;
+    dense_info_t node_infos;
     node_infos.clear();
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -343,11 +343,11 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
 static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     way_t way;
-    static std::vector<uint32_t> ikey;
+    std::vector<uint32_t> ikey;
     ikey.clear();
-    static std::vector<uint32_t> ivalue;
+    std::vector<uint32_t> ivalue;
     ivalue.clear();
-    static std::vector<int64_t> node_id;
+    std::vector<int64_t> node_id;
     node_id.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
@@ -385,7 +385,7 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
             n = current;
         } 
         way.node_refs = { node_id.data(), node_id.size() };
-        static std::vector<tag_t> tags;
+        std::vector<tag_t> tags;
         tags.clear();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
@@ -405,15 +405,15 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     relation_t relation;
-    static std::vector<uint32_t> ikey;
+    std::vector<uint32_t> ikey;
     ikey.clear();
-    static std::vector<uint32_t> ivalue;
+    std::vector<uint32_t> ivalue;
     ivalue.clear();
-    static std::vector<uint32_t> member_role;
+    std::vector<uint32_t> member_role;
     member_role.clear();
-    static std::vector<int64_t> member_id;
+    std::vector<int64_t> member_id;
     member_id.clear();
-    static std::vector<uint32_t> member_type;
+    std::vector<uint32_t> member_type;
     member_type.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
@@ -452,14 +452,14 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
 
     // decode relation
     {
-        static std::vector<tag_t> tags;
+        std::vector<tag_t> tags;
         tags.clear();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
         relation.tags = { tags.data(), tags.size() };
-        static std::vector<relation_member_t> members;
+        std::vector<relation_member_t> members;
         members.clear();
         int64_t current = 0;
         for(size_t i = 0; i < member_id.size(); ++i)
@@ -565,6 +565,102 @@ static bool input_blob(FILE* file, uint32_t header_size, const char* expected_ty
         return true;
 }
 
+static bool input_blob_threaded(FILE* file, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
+{
+    uint8_t* buffer1 = nullptr;
+
+    // read BlobHeader
+    buffer1 = (uint8_t*)realloc(buffer1, header_size);
+    size_t rd;
+    rd = fread(buffer1, 1, header_size, file);
+    if(rd != header_size)
+        return false;
+
+    // BlobHeader
+    bool expected_header_found = false;
+    uint64_t blob_size = 0;
+    size_t expected_type_len = strlen(expected_type);
+    iterate_fields(buffer1, buffer1 + header_size, [&](field_t& field)->bool{
+        switch(field.id5wt3)
+        {
+        case ID5WT3(1,2): // type
+            expected_header_found = (field.length == expected_type_len) && (memcmp(field.pointer, expected_type, expected_type_len) == 0);
+            break;
+        case ID5WT3(3,0): // datasize
+            blob_size = field.value_uint64;
+            break;
+        }
+        return true;
+    });
+    if(!expected_header_found || !blob_size)
+    {
+        free(buffer1);
+        return false;
+    }
+
+    // read Blob
+    buffer1 = (uint8_t*)realloc(buffer1, blob_size);
+    rd = fread(buffer1, 1, blob_size, file);
+    if(rd != blob_size)
+    {
+        free(buffer1);
+        return false;
+    }
+
+    auto handle_blob = [buffer1, blob_size, handler]()->bool
+    {
+        // Blob
+        uint8_t* buffer2 = nullptr;
+        uint8_t *zip_ptr = nullptr;
+        uint64_t zip_sz = 0;
+        uint8_t *raw_ptr = nullptr;
+        uint64_t raw_size = 0;
+        iterate_fields(buffer1, buffer1 + blob_size, [&](field_t& field)->bool{
+            switch(field.id5wt3)
+            {
+            case ID5WT3(1,2): // raw
+                raw_size = field.length;
+                raw_ptr = buffer2 = (uint8_t*)realloc(buffer2, raw_size);
+                memcpy(raw_ptr, field.pointer, raw_size);
+                break;
+            case ID5WT3(2,0): // raw size
+                raw_size = field.value_uint64;
+                break;
+            case ID5WT3(3,2): // zlib_data
+                zip_sz = field.length;
+                zip_ptr = field.pointer;
+                break;
+            }
+            return true;
+        });
+
+        // unzip if necessary
+        if(zip_ptr && zip_sz && raw_size)
+        {
+            raw_ptr = buffer2 = (uint8_t*)realloc(buffer2, raw_size);
+            if (!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
+            {
+                free(buffer1);
+                free(buffer2);
+                return false;
+            }
+        }
+
+        // use blob data
+        bool result = true;
+        if(handler)
+            result = handler(raw_ptr, raw_ptr + raw_size);
+        free(buffer1);
+        free(buffer2);
+        return result;
+    };
+
+    // handle blob in its own thread
+    std::thread th(handle_blob);
+    th.detach();
+    return true;
+}
+
 static bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
@@ -649,7 +745,7 @@ static bool input_file(FILE *f)
             return false;;
         header_size = read_net_uint32(buf);
         // OSMData blob
-        if(!input_blob(f, header_size, "OSMData", read_primitve_block))
+        if(!input_blob_threaded(f, header_size, "OSMData", read_primitve_block))
             return false;
     }
 
