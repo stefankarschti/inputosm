@@ -648,7 +648,7 @@ static bool input_file(FILE *f)
     if(4 != fread(buf, 1, 4, f))
         return false;
     uint32_t header_size = read_net_uint32(buf);
-    if(!input_blob(f, header_size, "OSMHeader", nullptr))
+    if(!input_blob_threaded(f, header_size, "OSMHeader", nullptr))
         return false;
 
     // Blobs
