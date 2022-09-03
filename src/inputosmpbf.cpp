@@ -18,6 +18,20 @@
 #include <vector>
 #include <zlib.h>
 #include <thread>
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <mutex>
+#include <memory>
+#include <queue>
+
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/mman.h>
 
 static constexpr uint8_t ID5WT3(uint8_t id, uint8_t wt)
 {
@@ -86,7 +100,7 @@ struct string_table_t
     }
 };
 
-uint32_t read_net_uint32(uint8_t *buf)
+inline uint32_t read_net_uint32(uint8_t *buf)
 {
     return ((uint32_t)(buf[0]) << 24u) | ((uint32_t)(buf[1]) << 16u) | ((uint32_t)(buf[2]) << 8u) | ((uint32_t)(buf[3]));
 }
@@ -158,7 +172,7 @@ static bool unzip_compressed_block(uint8_t *zip_ptr, size_t zip_sz, uint8_t *raw
     return ret == Z_OK && size == raw_sz;
 }
 
-static void read_sint64_packed(std::vector<int64_t>& packed, uint8_t* ptr, uint8_t* end)
+inline void read_sint64_packed(std::vector<int64_t>& packed, uint8_t* ptr, uint8_t* end)
 {
     while(ptr < end)
         packed.emplace_back(read_varint_sint64(ptr));
@@ -221,15 +235,15 @@ static bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* en
 
 static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
-    std::vector<int64_t> node_id;
+    thread_local std::vector<int64_t> node_id;
     node_id.clear();
-    std::vector<int64_t> latitude;
+    thread_local std::vector<int64_t> latitude;
     latitude.clear();
-    std::vector<int64_t> longitude;
+    thread_local std::vector<int64_t> longitude;
     longitude.clear();
-    std::vector<uint32_t> itags;
+    thread_local std::vector<uint32_t> itags;
     itags.clear();
-    dense_info_t node_infos;
+    thread_local dense_info_t node_infos;
     node_infos.clear();
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -252,7 +266,8 @@ static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t
             break;
         }
         return true;
-    })) return false;
+    }))
+        return false;
 
     // decode nodes
     if(node_id.size() == latitude.size()
@@ -264,12 +279,17 @@ static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t
     {
         node_t node;
         size_t itag = 0;
-        std::vector<tag_t> tags;
-        for(size_t i = 0; i < node_id.size(); ++i)
+        thread_local std::vector<tag_t> tags;
+        size_t node_id_size = node_id.size();
+        auto p_node_id = node_id.data();
+        auto p_node_id_end = p_node_id + node_id_size;
+        auto p_latitude = latitude.data();
+        auto p_longitude = longitude.data();
+        for(size_t i = 0; p_node_id < p_node_id_end; i++)
         {
-            node.id += node_id[i];
-            node.raw_latitude += latitude[i];
-            node.raw_longitude += longitude[i];
+            node.id += *p_node_id++;
+            node.raw_latitude += *p_latitude++;
+            node.raw_longitude += *p_longitude++;
             if(decode_node_coord)
             {
                 node.latitude = node.raw_latitude / 10000000.0;
@@ -301,7 +321,6 @@ static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t
 
             node.tags = {tags.data(), tags.size() };
 
-            // infos
             if(decode_metadata)
             {
                 node.version = node_infos.version[i];
@@ -343,11 +362,11 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
 static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     way_t way;
-    std::vector<uint32_t> ikey;
+    thread_local std::vector<uint32_t> ikey;
     ikey.clear();
-    std::vector<uint32_t> ivalue;
+    thread_local std::vector<uint32_t> ivalue;
     ivalue.clear();
-    std::vector<int64_t> node_id;
+    thread_local std::vector<int64_t> node_id;
     node_id.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
@@ -385,7 +404,7 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
             n = current;
         } 
         way.node_refs = { node_id.data(), node_id.size() };
-        std::vector<tag_t> tags;
+        thread_local std::vector<tag_t> tags;
         tags.clear();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
@@ -405,15 +424,15 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     relation_t relation;
-    std::vector<uint32_t> ikey;
+    thread_local std::vector<uint32_t> ikey;
     ikey.clear();
-    std::vector<uint32_t> ivalue;
+    thread_local std::vector<uint32_t> ivalue;
     ivalue.clear();
-    std::vector<uint32_t> member_role;
+    thread_local std::vector<uint32_t> member_role;
     member_role.clear();
-    std::vector<int64_t> member_id;
+    thread_local std::vector<int64_t> member_id;
     member_id.clear();
-    std::vector<uint32_t> member_type;
+    thread_local std::vector<uint32_t> member_type;
     member_type.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
@@ -452,14 +471,14 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
 
     // decode relation
     {
-        std::vector<tag_t> tags;
+        thread_local std::vector<tag_t> tags;
         tags.clear();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
         relation.tags = { tags.data(), tags.size() };
-        std::vector<relation_member_t> members;
+        thread_local std::vector<relation_member_t> members;
         members.clear();
         int64_t current = 0;
         for(size_t i = 0; i < member_id.size(); ++i)
@@ -479,102 +498,6 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
                 return false;
     }
 
-    return true;
-}
-
-static bool input_blob_threaded(FILE* file, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
-{
-    uint8_t* buffer1 = nullptr;
-
-    // read BlobHeader
-    buffer1 = (uint8_t*)realloc(buffer1, header_size);
-    size_t rd;
-    rd = fread(buffer1, 1, header_size, file);
-    if(rd != header_size)
-        return false;
-
-    // BlobHeader
-    bool expected_header_found = false;
-    uint64_t blob_size = 0;
-    size_t expected_type_len = strlen(expected_type);
-    iterate_fields(buffer1, buffer1 + header_size, [&](field_t& field)->bool{
-        switch(field.id5wt3)
-        {
-        case ID5WT3(1,2): // type
-            expected_header_found = (field.length == expected_type_len) && (memcmp(field.pointer, expected_type, expected_type_len) == 0);
-            break;
-        case ID5WT3(3,0): // datasize
-            blob_size = field.value_uint64;
-            break;
-        }
-        return true;
-    });
-    if(!expected_header_found || !blob_size)
-    {
-        free(buffer1);
-        return false;
-    }
-
-    // read Blob
-    buffer1 = (uint8_t*)realloc(buffer1, blob_size);
-    rd = fread(buffer1, 1, blob_size, file);
-    if(rd != blob_size)
-    {
-        free(buffer1);
-        return false;
-    }
-
-    auto handle_blob = [buffer1, blob_size, handler]()->bool
-    {
-        // Blob
-        uint8_t* buffer2 = nullptr;
-        uint8_t *zip_ptr = nullptr;
-        uint64_t zip_sz = 0;
-        uint8_t *raw_ptr = nullptr;
-        uint64_t raw_size = 0;
-        iterate_fields(buffer1, buffer1 + blob_size, [&](field_t& field)->bool{
-            switch(field.id5wt3)
-            {
-            case ID5WT3(1,2): // raw
-                raw_size = field.length;
-                raw_ptr = buffer2 = (uint8_t*)realloc(buffer2, raw_size);
-                memcpy(raw_ptr, field.pointer, raw_size);
-                break;
-            case ID5WT3(2,0): // raw size
-                raw_size = field.value_uint64;
-                break;
-            case ID5WT3(3,2): // zlib_data
-                zip_sz = field.length;
-                zip_ptr = field.pointer;
-                break;
-            }
-            return true;
-        });
-
-        // unzip if necessary
-        if(zip_ptr && zip_sz && raw_size)
-        {
-            raw_ptr = buffer2 = (uint8_t*)realloc(buffer2, raw_size);
-            if (!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
-            {
-                free(buffer1);
-                free(buffer2);
-                return false;
-            }
-        }
-
-        // use blob data
-        bool result = true;
-        if(handler)
-            result = handler(raw_ptr, raw_ptr + raw_size);
-        free(buffer1);
-        free(buffer2);
-        return result;
-    };
-
-    // handle blob in its own thread
-    std::thread th(handle_blob);
-    th.detach();
     return true;
 }
 
@@ -614,7 +537,7 @@ static bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uin
 static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
 {
     // PrimitiveBlock
-    string_table_t string_table;
+    thread_local string_table_t string_table;
     string_table.init(end - ptr);
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -640,30 +563,157 @@ static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
     });
 }
 
-static bool input_file(FILE *f)
+static std::atomic_int num_threads{0};
+static std::queue<std::function<bool()>> work_queue;
+static std::mutex mtx_queue;
+
+static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
 {
-    uint8_t buf[8];
+    // read BlobHeader
+    uint8_t* header_buffer = buffer;
+    buffer += header_size;
+    if(buffer > buffer_end)
+        return false;
+
+    // BlobHeader
+    bool expected_header_found = false;
+    uint64_t blob_size = 0;
+    size_t expected_type_len = strlen(expected_type);
+    iterate_fields(header_buffer, header_buffer + header_size, [&](field_t& field)->bool{
+        switch(field.id5wt3)
+        {
+        case ID5WT3(1,2): // type
+            expected_header_found = (field.length == expected_type_len) && (memcmp(field.pointer, expected_type, expected_type_len) == 0);
+            break;
+        case ID5WT3(3,0): // datasize
+            blob_size = field.value_uint64;
+            break;
+        }
+        return true;
+    });
+    if(!expected_header_found || !blob_size)
+        return false;
+
+    // read Blob
+    uint8_t* buffer1 = buffer;
+    buffer += blob_size;
+    if(buffer > buffer_end)
+        return false;
+
+    auto handle_blob = [buffer1, blob_size, handler]()->bool
+    {
+        num_threads++;
+
+        // Blob
+        uint8_t* buffer2 = nullptr;
+        uint8_t *zip_ptr = nullptr;
+        uint64_t zip_sz = 0;
+        uint8_t *raw_ptr = nullptr;
+        uint64_t raw_size = 0;
+        iterate_fields(buffer1, buffer1 + blob_size, [&](field_t& field)->bool{
+            switch(field.id5wt3)
+            {
+            case ID5WT3(1,2): // raw
+                raw_size = field.length;
+                raw_ptr = field.pointer;
+                break;
+            case ID5WT3(2,0): // raw size
+                raw_size = field.value_uint64;
+                break;
+            case ID5WT3(3,2): // zlib_data
+                zip_sz = field.length;
+                zip_ptr = field.pointer;
+                break;
+            }
+            return true;
+        });
+
+        // unzip if necessary
+        if(zip_ptr && zip_sz && raw_size)
+        {
+            assert(zip_ptr >= buffer1 && zip_ptr < buffer1 + blob_size);
+            assert(zip_ptr + zip_sz <= buffer1 + blob_size);
+            raw_ptr = buffer2 = (uint8_t*)malloc(raw_size);
+            if(!buffer2)
+                return false;
+            if(!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
+            {
+                free(buffer2);
+                return false;
+            }
+        }
+
+        // use blob data
+        bool result = true;
+        if(handler)
+            result = handler(raw_ptr, raw_ptr + raw_size);
+        free(buffer2);
+        
+        num_threads--;
+        return result;
+    };
+
+    // handle blob in its own thread
+    work_queue.push(handle_blob);
+    return true;
+}
+
+bool work()
+{
+    while(1)
+    {
+        std::function<bool()> work;
+        {
+            std::lock_guard<std::mutex> lck(mtx_queue);
+            if(work_queue.empty())
+                return true;
+            work = work_queue.front();
+            work_queue.pop();
+        }
+        if(!work())
+            return false;
+    }
+    return true;
+}
+
+static bool input_mem(uint8_t* file_begin, size_t file_size)
+{
+    uint8_t* file_end = file_begin + file_size;    
+    uint8_t* buf = file_begin;
 
     // header
-    if(4 != fread(buf, 1, 4, f))
+    if(buf + 4 > file_end)
         return false;
     uint32_t header_size = read_net_uint32(buf);
-    if(!input_blob_threaded(f, header_size, "OSMHeader", nullptr))
+    buf += 4;
+    if(!input_blob_mem(buf, file_end, header_size, "OSMHeader", nullptr))
         return false;
 
     // Blobs
-    while(1)
+    while(buf < file_end)
     {
         // header size
-        int rd = fread(buf, 1, 4, f);
-        if(rd == 0 && feof(f))
+        if(buf + 4 > file_end)
             break;
-        if(rd != 4)
-            return false;;
         header_size = read_net_uint32(buf);
+        buf += 4;
         // OSMData blob
-        if(!input_blob_threaded(f, header_size, "OSMData", read_primitve_block))
+        if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block))
             return false;
+    }
+
+    // spawn workers
+    std::thread worker_threads[std::thread::hardware_concurrency()];
+    for(auto& th: worker_threads)
+    {
+        th = std::thread(work);
+    }
+
+    // wait them to finish
+    for(auto& th: worker_threads)
+    {
+        if(th.joinable())
+            th.join();
     }
 
     return true;
@@ -671,14 +721,31 @@ static bool input_file(FILE *f)
 
 bool input_pbf(const char* filename)
 {
-    FILE *f = fopen(filename, "rb");
-    if(!f)
+    struct stat mmapstat;
+    if(stat(filename, &mmapstat) == -1)
     {
-        perror(filename);
+        perror("stat");
         return false;
     }
-    bool result = input_file(f);
-    fclose(f);
+    int fd;
+    if((fd = open(filename, O_RDONLY)) == -1)
+    {
+        perror("open");
+        return false;
+    }
+    uint8_t* file_data = (uint8_t*)mmap((caddr_t)0, mmapstat.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if((caddr_t)file_data == (caddr_t)(-1))
+    {
+        perror("mmap");
+        return false;
+    }
+    bool result = input_mem(file_data, mmapstat.st_size);
+    if(munmap(file_data, mmapstat.st_size) == -1)
+    {
+        perror("munmap");
+        return false;
+    }
+    close(fd);
     return result;
 }
 
