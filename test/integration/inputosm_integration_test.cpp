@@ -25,17 +25,17 @@ int main(int argc, char **argv)
             false,
             [&node_count](const input_osm::node_t &) -> bool
             { 
-                // node_count++; 
+                node_count.fetch_add(1, std::memory_order_relaxed);
                 return true; 
             },
             [&way_count](const input_osm::way_t &) -> bool
             {
-                // way_count++;
+                way_count.fetch_add(1, std::memory_order_relaxed);
                 return true;
             },
             [&relation_count](const input_osm::relation_t &) -> bool
             {
-                // relation_count++;
+                relation_count.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }))
     {

@@ -563,7 +563,6 @@ static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
     });
 }
 
-static std::atomic_int num_threads{0};
 static std::queue<std::function<bool()>> work_queue;
 static std::mutex mtx_queue;
 
@@ -602,8 +601,6 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
 
     auto handle_blob = [buffer1, blob_size, handler]()->bool
     {
-        num_threads++;
-
         // Blob
         uint8_t* buffer2 = nullptr;
         uint8_t *zip_ptr = nullptr;
@@ -648,8 +645,6 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
         if(handler)
             result = handler(raw_ptr, raw_ptr + raw_size);
         free(buffer2);
-        
-        num_threads--;
         return result;
     };
 
