@@ -85,6 +85,7 @@ enum class mode_t
 };
 
 extern mode_t osc_mode;
+extern thread_local int thread_index;
 
 bool input_file(const char* filename,
                 bool decode_metadata,

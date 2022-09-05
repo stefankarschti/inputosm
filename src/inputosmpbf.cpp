@@ -564,7 +564,7 @@ static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
 }
 
 static std::queue<std::function<bool()>> work_queue;
-static std::mutex mtx_queue;
+static std::mutex mtx_work_queue;
 
 static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
 {
@@ -653,19 +653,20 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
     return true;
 }
 
-bool work()
+bool work(int index)
 {
+    thread_index = index;
     while(1)
     {
-        std::function<bool()> work;
+        std::function<bool()> handler;
         {
-            std::lock_guard<std::mutex> lck(mtx_queue);
+            std::lock_guard<std::mutex> lck(mtx_work_queue);
             if(work_queue.empty())
                 return true;
-            work = work_queue.front();
+            handler = work_queue.front();
             work_queue.pop();
         }
-        if(!work())
+        if(!handler())
             return false;
     }
     return true;
@@ -699,9 +700,10 @@ static bool input_mem(uint8_t* file_begin, size_t file_size)
 
     // spawn workers
     std::thread worker_threads[std::thread::hardware_concurrency()];
+    int index = 0;
     for(auto& th: worker_threads)
     {
-        th = std::thread(work);
+        th = std::thread(work, index++);
     }
 
     // wait them to finish
