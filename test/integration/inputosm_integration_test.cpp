@@ -18,12 +18,9 @@ int main(int argc, char **argv)
         path = argv[1];
 
     int k_num_threads = std::thread::hardware_concurrency();
-    uint64_t node_count[k_num_threads];
-    uint64_t way_count[k_num_threads];
-    uint64_t relation_count[k_num_threads];
-    for(auto& x: node_count) x = 0;
-    for(auto& x: way_count) x = 0;
-    for(auto& x: relation_count) x = 0;
+    std::vector<uint64_t> node_count(k_num_threads, 0);
+    std::vector<uint64_t> way_count(k_num_threads, 0);
+    std::vector<uint64_t> relation_count(k_num_threads, 0);
 
     if (!input_osm::input_file(
             path,
