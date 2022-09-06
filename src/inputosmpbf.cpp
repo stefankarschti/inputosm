@@ -741,6 +741,10 @@ bool input_pbf(const char* filename)
     if((caddr_t)file_data == (caddr_t)(-1))
     {
         perror("mmap");
+    }
+    close(fd);
+    if((caddr_t)file_data == (caddr_t)(-1))
+    {
         return false;
     }
     bool result = input_mem(file_data, mmapstat.st_size);
@@ -749,7 +753,6 @@ bool input_pbf(const char* filename)
         perror("munmap");
         return false;
     }
-    close(fd);
     return result;
 }
 
