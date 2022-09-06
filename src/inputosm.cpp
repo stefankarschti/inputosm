@@ -23,7 +23,6 @@ std::function<bool(const node_t&)> node_handler;
 std::function<bool(const way_t&)> way_handler;
 std::function<bool(const relation_t&)> relation_handler;
 mode_t osc_mode;
-thread_local int thread_index{0};
 
 bool input_pbf(const char* filename);
 bool input_xml(const char* filename);

@@ -49,7 +49,6 @@ namespace input_osm {
  */
 
 extern bool decode_metadata, decode_node_coord;
-
 extern std::function<bool(const node_t&)> node_handler;
 extern std::function<bool(const way_t&)> way_handler;
 extern std::function<bool(const relation_t&)> relation_handler;
@@ -165,7 +164,7 @@ inline uint8_t* read_field(uint8_t *ptr, field_t &field)
     return ptr;
 }
 
-static bool unzip_compressed_block(uint8_t *zip_ptr, size_t zip_sz, uint8_t *raw_ptr, size_t raw_sz)
+inline bool unzip_compressed_block(uint8_t *zip_ptr, size_t zip_sz, uint8_t *raw_ptr, size_t raw_sz)
 {
     uLongf size = raw_sz;
     int ret = uncompress(raw_ptr, &size, zip_ptr, zip_sz);
@@ -178,20 +177,20 @@ inline void read_sint64_packed(std::vector<int64_t>& packed, uint8_t* ptr, uint8
         packed.emplace_back(read_varint_sint64(ptr));
 }
 
-static void read_sint32_packed(std::vector<int32_t>& packed, uint8_t* ptr, uint8_t* end)
+inline void read_sint32_packed(std::vector<int32_t>& packed, uint8_t* ptr, uint8_t* end)
 {
     while(ptr < end)
         packed.emplace_back(read_varint_sint64(ptr));
 }
 
-static void read_uint32_packed(std::vector<uint32_t>& packed, uint8_t* ptr, uint8_t* end)
+inline void read_uint32_packed(std::vector<uint32_t>& packed, uint8_t* ptr, uint8_t* end)
 {
     while(ptr < end)
         packed.emplace_back(read_varint_uint64(ptr));
 }
 
 template <typename Handler>
-static bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
+inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
 {
     while(ptr < end)
     {
@@ -205,7 +204,7 @@ static bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
     return true;
 }
 
-static bool read_string_table(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_string_table(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         if(field.id5wt3 == ID5WT3(1, 2)) // string
@@ -214,7 +213,7 @@ static bool read_string_table(string_table_t &string_table, uint8_t* ptr, uint8_
     }); 
 }
 
-static bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* end)
+bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* end)
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -233,7 +232,7 @@ static bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* en
     });
 }
 
-static bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     thread_local std::vector<int64_t> node_id;
     node_id.clear();
@@ -359,7 +358,7 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
     });
 }
 
-static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     way_t way;
     thread_local std::vector<uint32_t> ikey;
@@ -421,7 +420,7 @@ static bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
     return true;
 }
 
-static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     relation_t relation;
     thread_local std::vector<uint32_t> ikey;
@@ -501,7 +500,7 @@ static bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* e
     return true;
 }
 
-static bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -534,7 +533,7 @@ static bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uin
     });
 }
 
-static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
+bool read_primitve_block(uint8_t* ptr, uint8_t* end)
 {
     // PrimitiveBlock
     thread_local string_table_t string_table;
@@ -566,7 +565,7 @@ static bool read_primitve_block(uint8_t* ptr, uint8_t* end)
 static std::queue<std::function<bool()>> work_queue;
 static std::mutex mtx_work_queue;
 
-static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
+bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
 {
     // read BlobHeader
     uint8_t* header_buffer = buffer;
@@ -602,7 +601,7 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
     auto handle_blob = [buffer1, blob_size, handler]()->bool
     {
         // Blob
-        uint8_t* buffer2 = nullptr;
+        thread_local std::vector<uint8_t> buffer2;
         uint8_t *zip_ptr = nullptr;
         uint64_t zip_sz = 0;
         uint8_t *raw_ptr = nullptr;
@@ -630,12 +629,11 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
         {
             assert(zip_ptr >= buffer1 && zip_ptr < buffer1 + blob_size);
             assert(zip_ptr + zip_sz <= buffer1 + blob_size);
-            raw_ptr = buffer2 = (uint8_t*)malloc(raw_size);
-            if(!buffer2)
-                return false;
+            if(buffer2.size() < raw_size)
+                buffer2.resize(raw_size);
+            raw_ptr = buffer2.data();
             if(!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
             {
-                free(buffer2);
                 return false;
             }
         }
@@ -644,7 +642,6 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
         bool result = true;
         if(handler)
             result = handler(raw_ptr, raw_ptr + raw_size);
-        free(buffer2);
         return result;
     };
 
@@ -653,9 +650,20 @@ static bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t heade
     return true;
 }
 
-bool work(int index)
+size_t thread_count()
 {
-    thread_index = index;
+    return std::thread::hardware_concurrency();
+}
+
+thread_local size_t g_thread_index{0};
+size_t thread_index()
+{
+    return g_thread_index;
+}
+
+bool work(size_t index)
+{
+    g_thread_index = index;
     while(1)
     {
         std::function<bool()> handler;
@@ -672,7 +680,7 @@ bool work(int index)
     return true;
 }
 
-static bool input_mem(uint8_t* file_begin, size_t file_size)
+bool input_mem(uint8_t* file_begin, size_t file_size)
 {
     uint8_t* file_end = file_begin + file_size;    
     uint8_t* buf = file_begin;
@@ -699,11 +707,10 @@ static bool input_mem(uint8_t* file_begin, size_t file_size)
     }
 
     // spawn workers
-    std::thread worker_threads[std::thread::hardware_concurrency()];
-    int index = 0;
-    for(auto& th: worker_threads)
+    std::vector<std::thread> worker_threads(thread_count());
+    for(size_t index{0}; index < thread_count(); index++)
     {
-        th = std::thread(work, index++);
+        worker_threads[index] = std::thread(work, index);
     }
 
     // wait them to finish
