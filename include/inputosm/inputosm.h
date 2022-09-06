@@ -92,6 +92,8 @@ bool input_file(const char* filename,
                 std::function<bool(const node_t&)> node_handler,
                 std::function<bool(const way_t&)> way_handler,
                 std::function<bool(const relation_t&)> relation_handler);
+size_t thread_index();
+size_t thread_count();
 
 } // namespace
 
