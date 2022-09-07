@@ -655,17 +655,11 @@ size_t thread_count()
     return std::thread::hardware_concurrency();
 }
 
-thread_local size_t g_thread_index{0};
-size_t thread_index()
-{
-    return g_thread_index;
-}
-
 bool work(size_t index)
 {
-    g_thread_index = index;
     while(1)
     {
+        thread_index = std::min(index, thread_count() - 1);
         std::function<bool()> handler;
         {
             std::lock_guard<std::mutex> lck(mtx_work_queue);

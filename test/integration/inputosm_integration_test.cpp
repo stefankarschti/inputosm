@@ -28,20 +28,20 @@ int main(int argc, char **argv)
             false,
             [&node_count](const input_osm::node_t &) -> bool
             { 
-                assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
-                node_count[input_osm::thread_index()]++;
+                assert(input_osm::thread_index >= 0 && input_osm::thread_index < std::thread::hardware_concurrency());
+                node_count[input_osm::thread_index]++;
                 return true; 
             },
             [&way_count](const input_osm::way_t &) -> bool
             {
                 assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
-                way_count[input_osm::thread_index()]++;
+                way_count[input_osm::thread_index]++;
                 return true;
             },
             [&relation_count](const input_osm::relation_t &) -> bool
             {
                 assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
-                relation_count[input_osm::thread_index()]++;
+                relation_count[input_osm::thread_index]++;
                 return true;
             }))
     {
