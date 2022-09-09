@@ -49,7 +49,7 @@ namespace input_osm {
  */
 
 extern bool decode_metadata, decode_node_coord;
-extern std::function<bool(const node_t&)> node_handler;
+extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(const way_t&)> way_handler;
 extern std::function<bool(const relation_t&)> relation_handler;
 
@@ -276,9 +276,12 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
         && node_id.size() == node_infos.timestamp.size()
         && node_id.size() == node_infos.changeset.size())))
     {
+        thread_local std::vector<node_t> node_list;
+        node_list.clear();        
         node_t node;
         size_t itag = 0;
         thread_local std::vector<tag_t> tags;
+        tags.clear();
         size_t node_id_size = node_id.size();
         auto p_node_id = node_id.data();
         auto p_node_id_end = p_node_id + node_id_size;
@@ -297,7 +300,7 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 
             const char* pkey = nullptr;
             const char* pval = nullptr;
-            tags.clear();
+            size_t tags_start_index = tags.size();
             for(;itag < itags.size(); itag++)
             {
                 uint32_t istring = itags[itag];
@@ -317,8 +320,7 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
                     pkey = pval = nullptr;
                 }
             }
-
-            node.tags = {tags.data(), tags.size() };
+            node.tags = {tags.data() + tags_start_index, tags.size() - tags_start_index };
 
             if(decode_metadata)
             {
@@ -326,12 +328,12 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
                 node.timestamp += node_infos.timestamp[i];
                 node.changeset += node_infos.changeset[i];
             }
-
-            // report this node
-            if(node_handler)
-                if(!node_handler(node))
-                    return false;
+            node_list.push_back(node);
         }
+        // report the node list
+        if(node_handler)
+            if(!node_handler(span_t{node_list.data(), node_list.size()}))
+                return false;
     }
     else
         return false;

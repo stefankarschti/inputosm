@@ -12,14 +12,13 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
-
 #include <cstring>
 
 namespace input_osm {
 
 bool decode_metadata;
 bool decode_node_coord;
-std::function<bool(const node_t&)> node_handler;
+std::function<bool(span_t<node_t>)> node_handler;
 std::function<bool(const way_t&)> way_handler;
 std::function<bool(const relation_t&)> relation_handler;
 mode_t osc_mode;
@@ -31,7 +30,7 @@ bool input_xml(const char* filename);
 bool input_file(const char* filename,
                 bool decode_metadata,
                 bool decode_node_coord,
-                std::function<bool(const node_t&)> node_handler,
+                std::function<bool(span_t<node_t>)> node_handler,
                 std::function<bool(const way_t&)> way_handler,
                 std::function<bool(const relation_t&)> relation_handler)
 {
