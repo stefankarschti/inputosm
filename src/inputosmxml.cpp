@@ -25,9 +25,9 @@
 namespace input_osm {
 
 extern bool decode_metadata, decode_node_coord;
-extern std::function<bool(const node_t&)> node_handler;
-extern std::function<bool(const way_t&)> way_handler;
-extern std::function<bool(const relation_t&)> relation_handler;
+extern std::function<bool(span_t<node_t>)> node_handler;
+extern std::function<bool(span_t<way_t>)> way_handler;
+extern std::function<bool(span_t<relation_t>)> relation_handler;
 
 bool parser_enabled;
 node_t current_node;
@@ -85,7 +85,7 @@ xml_end_node()
     current_tag = current_tag_t::none;
     current_node.tags = {current_tags.data(), current_tags.size() };
     if(parser_enabled && node_handler)
-        parser_enabled = node_handler(current_node);
+        parser_enabled = node_handler({&current_node, 1});
     current_tags.clear();
     current_strings.clear();
 }
@@ -117,7 +117,7 @@ xml_end_way()
     current_way.tags = { current_tags.data(), current_tags.size()};
     current_way.node_refs = {current_refs.data(), current_refs.size()};
     if(parser_enabled && way_handler)
-        parser_enabled = way_handler(current_way);
+        parser_enabled = way_handler({&current_way, 1});
     current_tags.clear();
     current_strings.clear();
     current_refs.clear();
@@ -150,7 +150,7 @@ xml_end_relation()
     current_relation.tags = { current_tags.data(), current_tags.size() };
     current_relation.members = { current_members.data(), current_members.size() };
     if(parser_enabled && relation_handler)
-        parser_enabled = relation_handler(current_relation);
+        parser_enabled = relation_handler({&current_relation, 1});
     current_tags.clear();
     current_strings.clear();
     current_members.clear();
