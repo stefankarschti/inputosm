@@ -59,20 +59,22 @@ xml_start_node(const char **attr)
             current_node.id = atoll(attr[i + 1]);
         if(strcmp(attr[i], "lat") == 0)
         {
-            current_node.latitude = atof(attr[i + 1]);
-            current_node.raw_latitude = current_node.latitude * 10000000;
+            //current_node.latitude = atof(attr[i + 1]);
+            double latitude = atof(attr[i + 1]);
+            current_node.raw_latitude = latitude * 10000000;
         }
         if(strcmp(attr[i], "lon") == 0)
         {
-            current_node.longitude = atof(attr[i + 1]);
-            current_node.raw_longitude = current_node.longitude * 10000000;
+            // current_node.longitude = atof(attr[i + 1]);
+            double longitude = atof(attr[i + 1]);
+            current_node.raw_longitude = longitude * 10000000;
         }
-        if(strcmp(attr[i], "version") == 0)
-            current_node.version = atoi(attr[i + 1]);
-        if(strcmp(attr[i], "changeset") == 0)
-            current_node.changeset = atoll(attr[i + 1]);
-        if(strcmp(attr[i], "timestamp") == 0)
-            current_node.timestamp = str_to_timestamp(attr[i + 1]);
+        // if(strcmp(attr[i], "version") == 0)
+        //     current_node.version = atoi(attr[i + 1]);
+        // if(strcmp(attr[i], "changeset") == 0)
+        //     current_node.changeset = atoll(attr[i + 1]);
+        // if(strcmp(attr[i], "timestamp") == 0)
+        //     current_node.timestamp = str_to_timestamp(attr[i + 1]);
     }
 }
 
@@ -98,12 +100,12 @@ xml_start_way(const char **attr)
     {
         if(strcmp(attr[i], "id") == 0)
             current_way.id = atoll(attr[i + 1]);
-        if(strcmp(attr[i], "version") == 0)
-            current_way.version = atoi(attr[i + 1]);
-        if(strcmp(attr[i], "changeset") == 0)
-            current_way.changeset = atoll(attr[i + 1]);
-        if(strcmp(attr[i], "timestamp") == 0)
-            current_way.timestamp = str_to_timestamp(attr[i + 1]);
+        // if(strcmp(attr[i], "version") == 0)
+        //     current_way.version = atoi(attr[i + 1]);
+        // if(strcmp(attr[i], "changeset") == 0)
+        //     current_way.changeset = atoll(attr[i + 1]);
+        // if(strcmp(attr[i], "timestamp") == 0)
+        //     current_way.timestamp = str_to_timestamp(attr[i + 1]);
     }
 }
 
@@ -131,12 +133,12 @@ xml_start_relation(const char **attr)
     {
         if(strcmp(attr[i], "id") == 0)
             current_relation.id = atoll(attr[i + 1]);
-        if(strcmp(attr[i], "version") == 0)
-            current_relation.version = atoi(attr[i + 1]);
-        if(strcmp(attr[i], "changeset") == 0)
-            current_relation.changeset = atoll(attr[i + 1]);
-        if(strcmp(attr[i], "timestamp") == 0)
-            current_relation.timestamp = str_to_timestamp(attr[i + 1]);
+        // if(strcmp(attr[i], "version") == 0)
+        //     current_relation.version = atoi(attr[i + 1]);
+        // if(strcmp(attr[i], "changeset") == 0)
+        //     current_relation.changeset = atoll(attr[i + 1]);
+        // if(strcmp(attr[i], "timestamp") == 0)
+        //     current_relation.timestamp = str_to_timestamp(attr[i + 1]);
     }
 }
 

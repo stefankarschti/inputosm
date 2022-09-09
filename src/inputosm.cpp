@@ -19,8 +19,8 @@ namespace input_osm {
 bool decode_metadata;
 bool decode_node_coord;
 std::function<bool(span_t<node_t>)> node_handler;
-std::function<bool(const way_t&)> way_handler;
-std::function<bool(const relation_t&)> relation_handler;
+std::function<bool(span_t<way_t>)> way_handler;
+std::function<bool(span_t<relation_t>)> relation_handler;
 mode_t osc_mode;
 thread_local size_t thread_index{0};
 
@@ -31,8 +31,8 @@ bool input_file(const char* filename,
                 bool decode_metadata,
                 bool decode_node_coord,
                 std::function<bool(span_t<node_t>)> node_handler,
-                std::function<bool(const way_t&)> way_handler,
-                std::function<bool(const relation_t&)> relation_handler)
+                std::function<bool(span_t<way_t>)> way_handler,
+                std::function<bool(span_t<relation_t>)> relation_handler)
 {
     input_osm::decode_metadata = std::move(decode_metadata);
     input_osm::decode_node_coord = std::move(decode_node_coord);

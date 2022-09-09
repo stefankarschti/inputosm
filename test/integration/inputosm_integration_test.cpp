@@ -32,16 +32,16 @@ int main(int argc, char **argv)
                 node_count[input_osm::thread_index] += node_list.size();
                 return true; 
             },
-            [&way_count](const input_osm::way_t &) -> bool
+            [&way_count](input_osm::span_t<input_osm::way_t> way_list) -> bool
             {
                 assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
-                way_count[input_osm::thread_index]++;
+                way_count[input_osm::thread_index] += way_list.size();
                 return true;
             },
-            [&relation_count](const input_osm::relation_t &) -> bool
+            [&relation_count](input_osm::span_t<input_osm::relation_t> relation_list) -> bool
             {
                 assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
-                relation_count[input_osm::thread_index]++;
+                relation_count[input_osm::thread_index] += relation_list.size();
                 return true;
             }))
     {

@@ -50,8 +50,8 @@ namespace input_osm {
 
 extern bool decode_metadata, decode_node_coord;
 extern std::function<bool(span_t<node_t>)> node_handler;
-extern std::function<bool(const way_t&)> way_handler;
-extern std::function<bool(const relation_t&)> relation_handler;
+extern std::function<bool(span_t<way_t>)> way_handler;
+extern std::function<bool(span_t<relation_t>)> relation_handler;
 
 struct dense_info_t
 {
@@ -289,18 +289,20 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
         auto p_longitude = longitude.data();
         for(size_t i = 0; p_node_id < p_node_id_end; i++)
         {
+            // id
             node.id += *p_node_id++;
+            // position
             node.raw_latitude += *p_latitude++;
             node.raw_longitude += *p_longitude++;
-            if(decode_node_coord)
-            {
-                node.latitude = node.raw_latitude / 10000000.0;
-                node.longitude = node.raw_longitude / 10000000.0;
-            }
-
+            // if(decode_node_coord)
+            // {
+            //     node.latitude = node.raw_latitude / 10000000.0;
+            //     node.longitude = node.raw_longitude / 10000000.0;
+            // }
+            // tags
             const char* pkey = nullptr;
             const char* pval = nullptr;
-            size_t tags_start_index = tags.size();
+            node.tags_begin_index = tags.size();
             for(;itag < itags.size(); itag++)
             {
                 uint32_t istring = itags[itag];
@@ -320,15 +322,22 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
                     pkey = pval = nullptr;
                 }
             }
-            node.tags = {tags.data() + tags_start_index, tags.size() - tags_start_index };
-
-            if(decode_metadata)
-            {
-                node.version = node_infos.version[i];
-                node.timestamp += node_infos.timestamp[i];
-                node.changeset += node_infos.changeset[i];
-            }
+            node.tags_end_index = tags.size();
+            // metadata
+            // if(decode_metadata)
+            // {
+            //     node.version = node_infos.version[i];
+            //     node.timestamp += node_infos.timestamp[i];
+            //     node.changeset += node_infos.changeset[i];
+            // }
+            // add to node list
             node_list.push_back(node);
+        }
+
+        // fixup tag pointers
+        for(node_t& n: node_list)
+        {
+            n.tags = {tags.data() + n.tags_begin_index, n.tags_end_index - n.tags_begin_index };
         }
         // report the node list
         if(node_handler)
@@ -347,28 +356,27 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
         switch(field.id5wt3)
         {
         case ID5WT3(1,0): // version
-            obj.version = field.value_uint64;
+            // obj.version = field.value_uint64;
             break;
         case ID5WT3(2,0): // timestamp
-            obj.timestamp = field.value_uint64;
+            // obj.timestamp = field.value_uint64;
             break;
         case ID5WT3(3,0): // changeset
-            obj.changeset = field.value_uint64;
+            // obj.changeset = field.value_uint64;
             break;
         }
         return true;
     });
 }
 
-bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vector<tag_t>& tags, std::vector<int64_t>& node_id)
 {
     way_t way;
     thread_local std::vector<uint32_t> ikey;
     ikey.clear();
     thread_local std::vector<uint32_t> ivalue;
     ivalue.clear();
-    thread_local std::vector<int64_t> node_id;
-    node_id.clear();
+    way.node_refs_begin_index = node_id.size();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -398,31 +406,30 @@ bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 
     // decode way
     {
+        // node refs
         int64_t current = 0;
-        for(auto &n: node_id)
+        for(auto i = way.node_refs_begin_index; i < way.node_refs_end_index; ++i)
         {
+            auto &n = node_id[i];
             current += n;
             n = current;
         } 
-        way.node_refs = { node_id.data(), node_id.size() };
-        thread_local std::vector<tag_t> tags;
-        tags.clear();
+        way.node_refs_end_index = node_id.size();
+        // tags
+        way.tags_begin_index = tags.size();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
-        way.tags = { tags.data(), tags.size() };
-
-        // report this way
-        if(way_handler)
-            if(!way_handler(way))
-                return false;
+        way.tags_end_index = tags.size();
+        // add to list
+        way_list.push_back(way);
     }
 
     return true;
 }
 
-bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, std::vector<tag_t>& tags, std::vector<relation_member_t>& members)
 {
     relation_t relation;
     thread_local std::vector<uint32_t> ikey;
@@ -472,15 +479,15 @@ bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 
     // decode relation
     {
-        thread_local std::vector<tag_t> tags;
-        tags.clear();
+        // tags
+        relation.tags_begin_index = tags.size();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
-        relation.tags = { tags.data(), tags.size() };
-        thread_local std::vector<relation_member_t> members;
-        members.clear();
+        relation.tags_end_index = tags.size();
+        // members
+        relation.members_begin_index = members.size();
         int64_t current = 0;
         for(size_t i = 0; i < member_id.size(); ++i)
         {
@@ -491,12 +498,9 @@ bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
             mem.type = member_type[i];
             members.emplace_back(mem);
         }
-        relation.members = { members.data(), members.size() };
-
-        // report this relation
-        if(relation_handler)
-            if(!relation_handler(relation))
-                return false;
+        relation.members_end_index = members.size();
+        // add to list
+        relation_list.push_back(relation);
     }
 
     return true;
@@ -504,7 +508,20 @@ bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 
 bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
-    return iterate_fields(ptr, end, [&](field_t& field)->bool{
+    thread_local std::vector<way_t> way_list;
+    way_list.clear();
+    thread_local std::vector<tag_t> way_tags;
+    way_tags.clear();
+    thread_local std::vector<int64_t> way_node_refs;
+    way_node_refs.clear();
+    thread_local std::vector<relation_t> relation_list;
+    relation_list.clear();
+    thread_local std::vector<tag_t> relation_tags;
+    relation_tags.clear();
+    thread_local std::vector<relation_member_t> relation_members;
+    relation_members.clear();
+
+    bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
         case ID5WT3(1,2): // node
@@ -519,20 +536,52 @@ bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* e
         case ID5WT3(3,2): // way
             if(way_handler)
             {
-                if(!read_way(string_table, field.pointer, field.pointer + field.length))
+                if(!read_way(string_table, field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
                     return false;
             }
             break;
         case ID5WT3(4,2): // relation
             if(relation_handler)
             {
-                if(!read_relation(string_table, field.pointer, field.pointer + field.length))
+                if(!read_relation(string_table, field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
                     return false;
             }
             break;
         }
         return true;
     });
+    if(result)
+    {
+        // fixup way tag pointers
+        for(way_t& w: way_list)
+        {
+            w.tags = {way_tags.data() + w.tags_begin_index, w.tags_end_index - w.tags_begin_index };
+        }
+        // fixup way node ref pointers
+        for(way_t& w: way_list)
+        {
+            w.node_refs = {way_node_refs.data() + w.node_refs_begin_index, w.node_refs_end_index - w.node_refs_begin_index };
+        }
+        // report way list
+        if(way_handler)
+            if(!way_handler(span_t{way_list.data(), way_list.size()}))
+                return false;
+        // fixup relation tag pointers
+        for(relation_t& r: relation_list)
+        {
+            r.tags = {relation_tags.data() + r.tags_begin_index, r.tags_end_index - r.tags_begin_index };
+        }
+        // fixup relation member pointers
+        for(relation_t& r: relation_list)
+        {
+            r.members = {relation_members.data() + r.members_begin_index, r.members_end_index - r.members_begin_index };
+        }
+        // report relation list
+        if(relation_handler)
+            if(!relation_handler(span_t{relation_list.data(), relation_list.size()}))
+                return false;
+    }
+    return result;
 }
 
 bool read_primitve_block(uint8_t* ptr, uint8_t* end)
