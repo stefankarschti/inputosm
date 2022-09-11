@@ -2,11 +2,10 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <atomic>
-#include <thread>
 #include <numeric>
 #include <map>
 #include <cstring>
+#include <vector>
 
 int main(int argc, char **argv)
 {
@@ -35,13 +34,11 @@ int main(int argc, char **argv)
             false,
             [&node_count](input_osm::span_t<input_osm::node_t> node_list) -> bool
             { 
-                assert(input_osm::thread_index >= 0 && input_osm::thread_index < std::thread::hardware_concurrency());
                 node_count[input_osm::thread_index] += node_list.size();
                 return true; 
             },
             [&way_count, &ferry_count, &ferry](input_osm::span_t<input_osm::way_t> way_list) -> bool
             {
-                assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
                 way_count[input_osm::thread_index] += way_list.size();
                 for(auto &way: way_list)
                 {
@@ -58,7 +55,6 @@ int main(int argc, char **argv)
             },
             [&relation_count](input_osm::span_t<input_osm::relation_t> relation_list) -> bool
             {
-                assert(input_osm::thread_index() >= 0 && input_osm::thread_index() < std::thread::hardware_concurrency());
                 relation_count[input_osm::thread_index] += relation_list.size();
                 return true;
             }))
