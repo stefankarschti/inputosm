@@ -283,17 +283,13 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
         thread_local std::vector<tag_t> tags;
         tags.clear();
         size_t node_id_size = node_id.size();
-        auto p_node_id = node_id.data();
-        auto p_node_id_end = p_node_id + node_id_size;
-        auto p_latitude = latitude.data();
-        auto p_longitude = longitude.data();
-        for(size_t i = 0; p_node_id < p_node_id_end; i++)
+        for(size_t i = 0; i < node_id_size; ++i)
         {
             // id
-            node.id += *p_node_id++;
+            node.id += node_id[i];
             // position
-            node.raw_latitude += *p_latitude++;
-            node.raw_longitude += *p_longitude++;
+            node.raw_latitude += latitude[i];
+            node.raw_longitude += longitude[i];
             // if(decode_node_coord)
             // {
             //     node.latitude = node.raw_latitude / 10000000.0;

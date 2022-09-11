@@ -40,17 +40,17 @@ int main(int argc, char **argv)
             [&way_count, &ferry_count, &ferry](input_osm::span_t<input_osm::way_t> way_list) -> bool
             {
                 way_count[input_osm::thread_index] += way_list.size();
-                for(auto &way: way_list)
-                {
-                    for(auto &tag: way.tags)
-                    {
-                        if(strcasecmp(tag.key, "route") == 0 && strcasecmp(tag.value, "ferry") == 0)
-                        {
-                            ferry_count[input_osm::thread_index]++;
-                            ferry[input_osm::thread_index].emplace_back(ferry_info{.way_id = way.id, .node_id = std::vector<int64_t>(way.node_refs.begin(), way.node_refs.end())});
-                        }
-                    }
-                }
+                // for(auto &way: way_list)
+                // {
+                //     for(auto &tag: way.tags)
+                //     {
+                //         if(strcasecmp(tag.key, "route") == 0 && strcasecmp(tag.value, "ferry") == 0)
+                //         {
+                //             ferry_count[input_osm::thread_index]++;
+                //             ferry[input_osm::thread_index].emplace_back(ferry_info{.way_id = way.id, .node_id = std::vector<int64_t>(way.node_refs.begin(), way.node_refs.end())});
+                //         }
+                //     }
+                // }
                 return true;
             },
             [&relation_count](input_osm::span_t<input_osm::relation_t> relation_list) -> bool
@@ -63,9 +63,9 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    printf("%llu nodes\n", std::accumulate(node_count.begin(), node_count.end(), 0));
-    printf("%llu ways\n", std::accumulate(way_count.begin(), way_count.end(), 0));
-    printf("%llu relations\n", std::accumulate(relation_count.begin(), relation_count.end(), 0));
+    printf("%llu nodes\n", std::accumulate(node_count.begin(), node_count.end(), 0LLU));
+    printf("%llu ways\n", std::accumulate(way_count.begin(), way_count.end(), 0LLU));
+    printf("%llu relations\n", std::accumulate(relation_count.begin(), relation_count.end(), 0LLU));
 
     printf("%llu ferries\n", std::accumulate(ferry_count.begin(), ferry_count.end(), 0));
     /*
@@ -112,6 +112,6 @@ int main(int argc, char **argv)
     }
     printf("done.\n");
     */
-   
+
     return EXIT_SUCCESS;
 }
