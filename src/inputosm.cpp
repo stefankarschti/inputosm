@@ -17,7 +17,6 @@
 namespace input_osm {
 
 bool decode_metadata;
-bool decode_node_coord;
 std::function<bool(span_t<node_t>)> node_handler;
 std::function<bool(span_t<way_t>)> way_handler;
 std::function<bool(span_t<relation_t>)> relation_handler;
@@ -29,13 +28,11 @@ bool input_xml(const char* filename);
 
 bool input_file(const char* filename,
                 bool decode_metadata,
-                bool decode_node_coord,
                 std::function<bool(span_t<node_t>)> node_handler,
                 std::function<bool(span_t<way_t>)> way_handler,
                 std::function<bool(span_t<relation_t>)> relation_handler)
 {
-    input_osm::decode_metadata = std::move(decode_metadata);
-    input_osm::decode_node_coord = std::move(decode_node_coord);
+    input_osm::decode_metadata = decode_metadata;
     input_osm::node_handler = std::move(node_handler);
     input_osm::way_handler = way_handler;
     input_osm::relation_handler = relation_handler;

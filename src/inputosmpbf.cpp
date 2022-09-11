@@ -99,6 +99,12 @@ struct string_table_t
     }
 };
 
+struct fixup_t
+{
+    size_t begin = 0;
+    size_t end = 0;
+};
+
 inline uint32_t read_net_uint32(uint8_t *buf)
 {
     return ((uint32_t)(buf[0]) << 24u) | ((uint32_t)(buf[1]) << 16u) | ((uint32_t)(buf[2]) << 8u) | ((uint32_t)(buf[3]));
@@ -277,7 +283,10 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
         && node_id.size() == node_infos.changeset.size())))
     {
         thread_local std::vector<node_t> node_list;
-        node_list.clear();        
+        node_list.clear();
+        thread_local std::vector<fixup_t> node_tag_fixup;
+        node_tag_fixup.clear();
+
         node_t node;
         size_t itag = 0;
         thread_local std::vector<tag_t> tags;
@@ -290,15 +299,11 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
             // position
             node.raw_latitude += latitude[i];
             node.raw_longitude += longitude[i];
-            // if(decode_node_coord)
-            // {
-            //     node.latitude = node.raw_latitude / 10000000.0;
-            //     node.longitude = node.raw_longitude / 10000000.0;
-            // }
             // tags
             const char* pkey = nullptr;
             const char* pval = nullptr;
-            node.tags_begin_index = tags.size();
+            fixup_t f;
+            f.begin = tags.size();
             for(;itag < itags.size(); itag++)
             {
                 uint32_t istring = itags[itag];
@@ -318,7 +323,8 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
                     pkey = pval = nullptr;
                 }
             }
-            node.tags_end_index = tags.size();
+            f.end = tags.size();
+            node_tag_fixup.emplace_back(f);
             // metadata
             // if(decode_metadata)
             // {
@@ -331,9 +337,10 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
         }
 
         // fixup tag pointers
-        for(node_t& n: node_list)
+        for(auto i = 0; i < node_list.size(); ++i)
         {
-            n.tags = {tags.data() + n.tags_begin_index, n.tags_end_index - n.tags_begin_index };
+            node_t& n = node_list[i];
+            n.tags = {tags.data() + node_tag_fixup[i].begin, node_tag_fixup[i].end - node_tag_fixup[i].begin };
         }
         // report the node list
         if(node_handler)
@@ -368,14 +375,17 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
     });
 }
 
-bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vector<tag_t>& tags, std::vector<int64_t>& node_id)
+bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, 
+    std::vector<tag_t>& tags, std::vector<fixup_t>& tags_fixup, 
+    std::vector<int64_t>& node_refs, std::vector<fixup_t>& node_refs_fixup)
 {
     way_t way;
     thread_local std::vector<uint32_t> ikey;
     ikey.clear();
     thread_local std::vector<uint32_t> ivalue;
     ivalue.clear();
-    way.node_refs_begin_index = node_id.size();
+    fixup_t f;
+    f.begin = node_refs.size();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -394,7 +404,7 @@ bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vec
                 read_info<way_t>(way, field.pointer, field.pointer + field.length);
             break;
         case ID5WT3(8,2): // node ids
-            read_sint64_packed(node_id, field.pointer, field.pointer + field.length);
+            read_sint64_packed(node_refs, field.pointer, field.pointer + field.length);
             break;
         }
        return true;
@@ -407,20 +417,22 @@ bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vec
     {
         // node refs
         int64_t current = 0;
-        for(auto i = way.node_refs_begin_index; i < way.node_refs_end_index; ++i)
+        for(auto i = f.begin; i < node_refs.size(); ++i)
         {
-            auto &n = node_id[i];
+            auto &n = node_refs[i];
             current += n;
             n = current;
         } 
-        way.node_refs_end_index = node_id.size();
+        f.end = node_refs.size();
+        node_refs_fixup.emplace_back(f);
         // tags
-        way.tags_begin_index = tags.size();
+        f.begin = tags.size();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
-        way.tags_end_index = tags.size();
+        f.end = tags.size();
+        tags_fixup.emplace_back(f);
         // add to list
         way_list.push_back(way);
     }
@@ -428,7 +440,9 @@ bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vec
     return true;
 }
 
-bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, std::vector<tag_t>& tags, std::vector<relation_member_t>& members)
+bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, 
+    std::vector<tag_t>& tags, std::vector<fixup_t>& tags_fixup,
+    std::vector<relation_member_t>& members, std::vector<fixup_t>& members_fixup)
 {
     relation_t relation;
     thread_local std::vector<uint32_t> ikey;
@@ -479,14 +493,16 @@ bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std
     // decode relation
     {
         // tags
-        relation.tags_begin_index = tags.size();
+        fixup_t f;
+        f.begin = tags.size();
         for(size_t i = 0; i < ikey.size(); ++i)
         {
             tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
         }
-        relation.tags_end_index = tags.size();
+        f.end = tags.size();
+        tags_fixup.emplace_back(f);
         // members
-        relation.members_begin_index = members.size();
+        f.begin = members.size();
         int64_t current = 0;
         for(size_t i = 0; i < member_id.size(); ++i)
         {
@@ -497,7 +513,8 @@ bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std
             mem.type = member_type[i];
             members.emplace_back(mem);
         }
-        relation.members_end_index = members.size();
+        f.end = members.size();
+        members_fixup.emplace_back(f);
         // add to list
         relation_list.push_back(relation);
     }
@@ -511,14 +528,23 @@ bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* e
     way_list.clear();
     thread_local std::vector<tag_t> way_tags;
     way_tags.clear();
+    thread_local std::vector<fixup_t> way_tags_fixup;
+    way_tags_fixup.clear();
     thread_local std::vector<int64_t> way_node_refs;
     way_node_refs.clear();
+    thread_local std::vector<fixup_t> way_node_refs_fixup;
+    way_node_refs_fixup.clear();
+
     thread_local std::vector<relation_t> relation_list;
     relation_list.clear();
     thread_local std::vector<tag_t> relation_tags;
     relation_tags.clear();
+    thread_local std::vector<fixup_t> relation_tags_fixup;
+    relation_tags_fixup.clear();
     thread_local std::vector<relation_member_t> relation_members;
     relation_members.clear();
+    thread_local std::vector<fixup_t> relation_members_fixup;
+    relation_members_fixup.clear();
 
     bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -535,14 +561,14 @@ bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* e
         case ID5WT3(3,2): // way
             if(way_handler)
             {
-                if(!read_way(string_table, field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
+                if(!read_way(string_table, field.pointer, field.pointer + field.length, way_list, way_tags, way_tags_fixup, way_node_refs, way_node_refs_fixup))
                     return false;
             }
             break;
         case ID5WT3(4,2): // relation
             if(relation_handler)
             {
-                if(!read_relation(string_table, field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
+                if(!read_relation(string_table, field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_tags_fixup, relation_members, relation_members_fixup))
                     return false;
             }
             break;
@@ -551,29 +577,25 @@ bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* e
     });
     if(result)
     {
-        // fixup way tag pointers
-        for(way_t& w: way_list)
+        for(auto i{0}; i < way_list.size(); ++i)
         {
-            w.tags = {way_tags.data() + w.tags_begin_index, w.tags_end_index - w.tags_begin_index };
-        }
-        // fixup way node ref pointers
-        for(way_t& w: way_list)
-        {
-            w.node_refs = {way_node_refs.data() + w.node_refs_begin_index, w.node_refs_end_index - w.node_refs_begin_index };
+            way_t& w = way_list[i];
+            // fixup way tag pointers
+            w.tags = {way_tags.data() + way_tags_fixup[i].begin, way_tags_fixup[i].end - way_tags_fixup[i].begin };
+            // fixup way node ref pointers
+            w.node_refs = {way_node_refs.data() + way_node_refs_fixup[i].begin, way_node_refs_fixup[i].end - way_node_refs_fixup[i].begin };
         }
         // report way list
         if(way_handler)
             if(!way_handler(span_t{way_list.data(), way_list.size()}))
                 return false;
-        // fixup relation tag pointers
-        for(relation_t& r: relation_list)
+        for(auto i{0}; i < relation_list.size(); ++i)
         {
-            r.tags = {relation_tags.data() + r.tags_begin_index, r.tags_end_index - r.tags_begin_index };
-        }
-        // fixup relation member pointers
-        for(relation_t& r: relation_list)
-        {
-            r.members = {relation_members.data() + r.members_begin_index, r.members_end_index - r.members_begin_index };
+            relation_t& r = relation_list[i];
+            // fixup relation tag pointers
+            r.tags = {relation_tags.data() + relation_tags_fixup[i].begin, relation_tags_fixup[i].end - relation_tags_fixup[i].begin };
+            // fixup relation member pointers
+            r.members = {relation_members.data() + relation_members_fixup[i].begin, relation_members_fixup[i].end - relation_members_fixup[i].begin };
         }
         // report relation list
         if(relation_handler)
