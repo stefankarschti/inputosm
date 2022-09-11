@@ -68,6 +68,7 @@ int main(int argc, char **argv)
     printf("%llu relations\n", std::accumulate(relation_count.begin(), relation_count.end(), 0));
 
     printf("%llu ferries\n", std::accumulate(ferry_count.begin(), ferry_count.end(), 0));
+    /*
     struct pos
     {
         int64_t raw_longitude;
@@ -110,6 +111,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     printf("done.\n");
-
+    */
+   
     return EXIT_SUCCESS;
 }

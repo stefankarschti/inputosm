@@ -345,7 +345,10 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
                 return false;
     }
     else
+    {
+        printf("skipped node block\n");
         return false;
+    }
     return true;;
 }
 
