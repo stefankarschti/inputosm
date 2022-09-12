@@ -240,118 +240,103 @@ bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* end)
 
 bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
 {
-    thread_local std::vector<int64_t> node_id;
-    node_id.clear();
-    thread_local std::vector<int64_t> latitude;
-    latitude.clear();
-    thread_local std::vector<int64_t> longitude;
-    longitude.clear();
-    thread_local std::vector<uint32_t> itags;
-    itags.clear();
+    thread_local std::vector<node_t> node_list;
+    node_list.clear();
+    thread_local std::vector<tag_t> tags;
+    tags.clear();
+    thread_local std::vector<fixup_t> node_tag_fixup;
+    node_tag_fixup.clear();
     thread_local dense_info_t node_infos;
     node_infos.clear();
+
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
         case ID5WT3(1,2): // node ids
-            read_sint64_packed(node_id, field.pointer, field.pointer + field.length);
+            {
+                int64_t id = 0;                
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                {
+                    node_list.push_back(node_t());
+                    id += read_varint_sint64(ptr);
+                    node_list.back().id = id;
+                }
+            }
             break;
         case ID5WT3(5,2): // dense infos
             if(decode_metadata)
                 read_dense_infos(node_infos, field.pointer, field.pointer + field.length);
             break;
         case ID5WT3(8,2): // latitudes
-            read_sint64_packed(latitude, field.pointer, field.pointer + field.length);
+            {
+                int64_t latitude = 0;
+                size_t i = 0;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                {
+                    latitude += read_varint_sint64(ptr);
+                    node_list[i++].raw_latitude = latitude;
+                }
+            }
             break;
         case ID5WT3(9,2): // longitudes
-            read_sint64_packed(longitude, field.pointer, field.pointer + field.length);
+            {
+                int64_t longitude = 0;
+                size_t i = 0;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                {
+                    longitude += read_varint_sint64(ptr);
+                    node_list[i++].raw_latitude = longitude;
+                }
+            }
             break;
         case ID5WT3(10,2): // packed indexes to keys & values
-            read_uint32_packed(itags, field.pointer, field.pointer + field.length);
+            {
+                size_t i = 0;
+                fixup_t f{0, 0};
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                {
+                    uint32_t istring = read_varint_uint64(ptr);
+                    if(!istring)
+                    {
+                        ++i;
+                        f.end = tags.size();
+                        node_tag_fixup.push_back(f);
+                        f.begin = f.end;
+                        continue;
+                    }
+                    const char* pkey = string_table.get(istring);
+                    istring = read_varint_uint64(ptr);
+                    if(!istring)
+                    {
+                        ++i;
+                        f.end = tags.size();
+                        node_tag_fixup.push_back(f);
+                        f.begin = f.end;
+                        continue;
+                    }
+                    const char* pval = string_table.get(istring);
+                    tags.emplace_back(tag_t{pkey, pval});
+                    f.end = tags.size();
+                    node_tag_fixup.push_back(f);
+                    f.begin = f.end;
+                }
+            }
             break;
         }
         return true;
     }))
         return false;
 
-    // decode nodes
-    if(node_id.size() == latitude.size()
-        && node_id.size() == longitude.size()
-        && (!decode_metadata ||
-        (node_id.size() == node_infos.version.size()
-        && node_id.size() == node_infos.timestamp.size()
-        && node_id.size() == node_infos.changeset.size())))
+    // fixup tag pointers
+    for(auto i = 0; i < node_list.size(); ++i)
     {
-        thread_local std::vector<node_t> node_list;
-        node_list.clear();
-        thread_local std::vector<fixup_t> node_tag_fixup;
-        node_tag_fixup.clear();
-
-        node_t node;
-        size_t itag = 0;
-        thread_local std::vector<tag_t> tags;
-        tags.clear();
-        size_t node_id_size = node_id.size();
-        for(size_t i = 0; i < node_id_size; ++i)
-        {
-            // id
-            node.id += node_id[i];
-            // position
-            node.raw_latitude += latitude[i];
-            node.raw_longitude += longitude[i];
-            // tags
-            const char* pkey = nullptr;
-            const char* pval = nullptr;
-            fixup_t f;
-            f.begin = tags.size();
-            for(;itag < itags.size(); itag++)
-            {
-                uint32_t istring = itags[itag];
-                if(!istring)
-                {
-                    itag++;
-                    break;
-                }
-                if(!pkey)
-                {
-                    pkey = string_table.get(istring);
-                }
-                else
-                {
-                    pval = string_table.get(istring);
-                    tags.emplace_back(tag_t{pkey, pval});
-                    pkey = pval = nullptr;
-                }
-            }
-            f.end = tags.size();
-            node_tag_fixup.emplace_back(f);
-            // metadata
-            // if(decode_metadata)
-            // {
-            //     node.version = node_infos.version[i];
-            //     node.timestamp += node_infos.timestamp[i];
-            //     node.changeset += node_infos.changeset[i];
-            // }
-            // add to node list
-            node_list.push_back(node);
-        }
-
-        // fixup tag pointers
-        for(auto i = 0; i < node_list.size(); ++i)
-        {
-            node_t& n = node_list[i];
-            n.tags = {tags.data() + node_tag_fixup[i].begin, node_tag_fixup[i].end - node_tag_fixup[i].begin };
-        }
-        // report the node list
-        if(node_handler)
-            if(!node_handler(span_t{node_list.data(), node_list.size()}))
-                return false;
+        node_t& n = node_list[i];
+        n.tags = {tags.data() + node_tag_fixup[i].begin, node_tag_fixup[i].end - node_tag_fixup[i].begin };
     }
-    else
-    {
-        printf("skipped node block\n");
-        return false;
-    }
+    // report the node list
+    if(node_handler)
+        if(!node_handler(span_t{node_list.data(), node_list.size()}))
+            return false;
     return true;;
 }
 

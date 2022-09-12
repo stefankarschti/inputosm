@@ -32,9 +32,9 @@ struct node_t
     int64_t raw_latitude = 0;
     int64_t raw_longitude = 0;
     span_t<tag_t> tags;    
-    // int32_t version = 0;
-    // int32_t timestamp = 0;
-    // int32_t changeset = 0;
+    int32_t version = 0;
+    int32_t timestamp = 0;
+    int32_t changeset = 0;
 };
 static_assert(sizeof(node_t) <= 64);
 struct way_t
@@ -42,9 +42,9 @@ struct way_t
     int64_t id = 0;
     span_t<int64_t> node_refs;
     span_t<tag_t> tags;
-    // int32_t version = 0;
-    // int32_t timestamp = 0;
-    // int32_t changeset = 0;
+    int32_t version = 0;
+    int32_t timestamp = 0;
+    int32_t changeset = 0;
 };
 static_assert(sizeof(way_t) <= 64);
 struct relation_member_t
@@ -63,10 +63,9 @@ struct relation_t
     int64_t id = 0;
     span_t<relation_member_t> members;
     span_t<tag_t> tags;
-
-    // int32_t version = 0;
-    // int32_t timestamp = 0;
-    // int32_t changeset = 0;
+    int32_t version = 0;
+    int32_t timestamp = 0;
+    int32_t changeset = 0;
 };
 static_assert(sizeof(relation_t) <= 64);
 

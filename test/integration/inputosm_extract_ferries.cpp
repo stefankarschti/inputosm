@@ -34,7 +34,7 @@ int main(int argc, char **argv)
                 {
                     for(auto &tag: way.tags)
                     {
-                        if(strcasecmp(tag.key, "route") == 0 && strcasecmp(tag.value, "ferry") == 0)
+                        if(strcmp(tag.key, "route") == 0 && strcmp(tag.value, "ferry") == 0)
                         {
                             ferry_count[input_osm::thread_index]++;
                             ferry[input_osm::thread_index].emplace_back(ferry_info{.way_id = way.id, .node_id = std::vector<int64_t>(way.node_refs.begin(), way.node_refs.end())});
