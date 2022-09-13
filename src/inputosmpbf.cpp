@@ -238,6 +238,22 @@ inline bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* en
     });
 }
 
+template <typename T>
+inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
+{
+    while(index >= vec.size())
+    {
+        size_t previous_capacity = vec.capacity();
+        vec.emplace_back();
+        if(vec.capacity() > previous_capacity)
+        {
+            printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
+            return false;
+        }
+    }
+    return true;
+}
+
 bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
 {
     thread_local std::vector<node_t> node_list(16000);
@@ -256,7 +272,8 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
                 {
                     id += read_varint_sint64(ptr);
-                    node_list.emplace_back(node_t{.id = id});
+                    node_list.emplace_back();
+                    node_list.back().id = id;
                 }
             }
             break;
@@ -293,9 +310,11 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 while(invalid)
                 {
                     invalid = false;
-                    size_t i = 0;
                     tags.clear();
                     auto itag_start = tags.begin();
+                    auto inode = node_list.begin();
+                    size_t previous_capacity = tags.capacity();
+                    size_t tags_size = tags.size();
                     for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
                     {
                         // read key
@@ -305,21 +324,21 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                             // finish up current node
                             if(itag_start != tags.end())
                             {
-                                node_list[i].tags = span_t{&(*itag_start), static_cast<size_t>(tags.end() - itag_start)};
+                                inode->tags = span_t{&(*itag_start), static_cast<size_t>(tags.end() - itag_start)};
                             }
                             itag_start = tags.end();
-                            ++i;
+                            ++inode;
                             continue;
                         }
-                        const char* pkey = string_table.get(istring);
-                        // read value
-                        istring = read_varint_uint64(ptr);
-                        const char* pval = string_table.get(istring);
                         // add to tags
-                        size_t previous_capacity = tags.capacity();
-                        tags.emplace_back(tag_t{pkey, pval});
+                        tags.emplace_back();
+                        ++tags_size;
+                        // get key
+                        tags.back().key = string_table.get(istring);
+                        // read value
+                        tags.back().value = string_table.get(read_varint_uint64(ptr));
                         // check for invalidity
-                        if(tags.capacity() > previous_capacity)
+                        if(tags_size > previous_capacity)
                         {
                             // all references to tags are invalid. restart.
                             invalid = true;
@@ -358,22 +377,6 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end) noexcept
         }
         return true;
     });
-}
-
-template <typename T>
-inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
-{
-    while(index >= vec.size())
-    {
-        size_t previous_capacity = vec.capacity();
-        vec.emplace_back();
-        if(vec.capacity() > previous_capacity)
-        {
-            printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
-            return false;
-        }
-    }
-    return true;
 }
 
 bool read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vector<tag_t>& tags, std::vector<int64_t>& node_refs) noexcept
