@@ -23,14 +23,14 @@ std::function<bool(span_t<relation_t>)> relation_handler;
 mode_t osc_mode;
 thread_local size_t thread_index{0};
 
-bool input_pbf(const char* filename);
+bool input_pbf(const char* filename) noexcept;
 bool input_xml(const char* filename);
 
 bool input_file(const char* filename,
                 bool decode_metadata,
                 std::function<bool(span_t<node_t>)> node_handler,
                 std::function<bool(span_t<way_t>)> way_handler,
-                std::function<bool(span_t<relation_t>)> relation_handler)
+                std::function<bool(span_t<relation_t>)> relation_handler) noexcept
 {
     input_osm::decode_metadata = decode_metadata;
     input_osm::node_handler = std::move(node_handler);
