@@ -549,9 +549,9 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
 
     thread_local std::vector<relation_t> relation_list(1024);
     relation_list.clear();
-    thread_local std::vector<tag_t> relation_tags(16000);
+    thread_local std::vector<tag_t> relation_tags(256000);
     relation_tags.clear();
-    thread_local std::vector<relation_member_t> relation_members(128000);
+    thread_local std::vector<relation_member_t> relation_members(512000);
     relation_members.clear();
 
     bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
