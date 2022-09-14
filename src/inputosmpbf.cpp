@@ -300,7 +300,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
                 {
                     longitude += read_varint_sint64(ptr);
-                    inode->raw_latitude = longitude;
+                    inode->raw_longitude = longitude;
                 }
             }
             break;
@@ -540,6 +540,7 @@ bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation
 
 bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
 {
+    // FIXME: dynamically adapt to higher element counts
     thread_local std::vector<way_t> way_list(8000);
     way_list.clear();
     thread_local std::vector<tag_t> way_tags(256000);

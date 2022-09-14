@@ -9,5 +9,8 @@ target_link_libraries(inputosm_count_all PRIVATE Threads::Threads inputosm::inpu
 add_executable(inputosm_count_all2 inputosm_count_all2.cpp)
 target_link_libraries(inputosm_count_all2 PRIVATE Threads::Threads inputosm::inputosm)
 
-add_executable(inputosm_extract_ferries inputosm_extract_ferries.cpp)
-target_link_libraries(inputosm_extract_ferries PRIVATE Threads::Threads inputosm::inputosm)
+add_executable(extract_ferries extract_ferries.cpp)
+target_link_libraries(extract_ferries PRIVATE Threads::Threads inputosm::inputosm)
+
+add_executable(export_csv export_csv.cpp)
+target_link_libraries(export_csv PRIVATE Threads::Threads inputosm::inputosm)
