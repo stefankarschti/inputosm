@@ -15,7 +15,10 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     const char* path = argv[1];
-    bool read_metadata = argc >= 2;
+    printf("%s\n", path);
+    bool read_metadata = (argc >= 3);
+    if(read_metadata)
+        printf("reading metadata\n");
     
     std::vector<uint64_t> node_count(input_osm::thread_count(), 0);
     std::vector<uint64_t> way_count(input_osm::thread_count(), 0);
