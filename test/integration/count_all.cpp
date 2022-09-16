@@ -11,10 +11,11 @@ int main(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage %s <path-to-pbf>\n", argv[0]);
+        printf("Usage %s <path-to-pbf> [read-metadata]\n", argv[0]);
         return EXIT_FAILURE;
     }
     const char* path = argv[1];
+    bool read_metadata = argc >= 2;
     
     std::vector<uint64_t> node_count(input_osm::thread_count(), 0);
     std::vector<uint64_t> way_count(input_osm::thread_count(), 0);
@@ -22,7 +23,7 @@ int main(int argc, char **argv)
 
     if (!input_osm::input_file(
             path,
-            false,
+            read_metadata,
             [&node_count](input_osm::span_t<input_osm::node_t> node_list) -> bool
             { 
                 node_count[input_osm::thread_index] += node_list.size();

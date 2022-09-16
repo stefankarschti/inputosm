@@ -22,7 +22,7 @@
 bool write_file(const char* filename, std::vector<std::string> &lines)
 {
     size_t file_size = 0;
-    for(auto &s: lines)
+    for(const auto &s: lines)
     {
         file_size += s.length();
     }
@@ -100,7 +100,7 @@ int main(int argc, char **argv)
     std::cout << "extracting nodes...\n";
     if(!input_osm::input_file(
             path,
-            false,
+            true,
             [&lines, &node_pos](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool
             {
                 std::stringstream ss;
@@ -142,7 +142,7 @@ int main(int argc, char **argv)
     std::vector<std::string> lines_relation_members(input_osm::thread_count());
     if(!input_osm::input_file(
             path,
-            false,
+            true,
             nullptr,
             [&lines, &node_pos, &lines_way_node](input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool
             {

@@ -219,25 +219,6 @@ inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
     }); 
 }
 
-inline bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* end) noexcept
-{
-    return iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
-        {
-        case ID5WT3(1,2): // versions. not delta encoded
-            read_uint32_packed(node_infos.version, field.pointer, field.pointer + field.length);
-            break;
-        case ID5WT3(2,2): // timestamps. delta encoded
-            read_sint64_packed(node_infos.timestamp, field.pointer, field.pointer + field.length);
-            break;
-        case ID5WT3(3,2): // changesets. delta encoded
-            read_sint64_packed(node_infos.changeset, field.pointer, field.pointer + field.length);
-            break;
-        }
-        return true;
-    });
-}
-
 template <typename T>
 inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
 {
@@ -260,13 +241,11 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
     node_list.clear();
     thread_local std::vector<tag_t> tags(256000);
     tags.clear();
-    thread_local dense_info_t node_infos;
-    node_infos.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case ID5WT3(1,2): // node ids
+        case ID5WT3(1,2): // node ids. delta encoded
             {
                 int64_t id = 0;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
@@ -279,10 +258,47 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
             break;
         case ID5WT3(5,2): // dense infos
             if(decode_metadata)
-                read_dense_infos(node_infos, field.pointer, field.pointer + field.length); 
-            // FIXME: add info to nodes
+            {
+                iterate_fields(field.pointer, field.pointer + field.length, [](field_t& field)->bool{
+                    switch(field.id5wt3)
+                    {
+                    case ID5WT3(1,2): // versions. not delta encoded
+                        {
+                            auto inode = node_list.begin();
+                            for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
+                            {
+                                inode->version = read_varint_uint64(ptr);
+                            }
+                        }
+                        break;
+                    case ID5WT3(2,2): // timestamps. delta encoded
+                        {
+                            int64_t timestamp = 0;
+                            auto inode = node_list.begin();
+                            for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
+                            {
+                                timestamp += read_varint_sint64(ptr);
+                                inode->timestamp = timestamp;
+                            }
+                        }
+                        break;
+                    case ID5WT3(3,2): // changesets. delta encoded
+                        {
+                            int64_t changeset = 0;
+                            auto inode = node_list.begin();
+                            for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
+                            {
+                                changeset += read_varint_sint64(ptr);
+                                inode->changeset = changeset;
+                            }
+                        }
+                        break;
+                    }
+                    return true;
+                });
+            }
             break;
-        case ID5WT3(8,2): // latitudes
+        case ID5WT3(8,2): // latitudes. delta encoded
             {
                 int64_t latitude = 0;
                 auto inode = node_list.begin();
@@ -293,7 +309,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 }
             }
             break;
-        case ID5WT3(9,2): // longitudes
+        case ID5WT3(9,2): // longitudes. delta encoded
             {
                 int64_t longitude = 0;
                 auto inode = node_list.begin();
@@ -545,7 +561,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
     way_list.clear();
     thread_local std::vector<tag_t> way_tags(256000);
     way_tags.clear();
-    thread_local std::vector<int64_t> way_node_refs(1024000);
+    thread_local std::vector<int64_t> way_node_refs(2048000);
     way_node_refs.clear();
 
     thread_local std::vector<relation_t> relation_list(1024);
