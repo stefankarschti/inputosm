@@ -82,6 +82,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     const char* path = argv[1]; // "/mnt/maps/north-america-220728.osm.pbf";
+    input_osm::set_max_thread_count();
+    printf("running on %zu threads\n", input_osm::thread_count());
     std::vector<std::string> lines(input_osm::thread_count());
     struct pos
     {

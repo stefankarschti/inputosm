@@ -24,6 +24,7 @@
 #include <mutex>
 #include <memory>
 #include <queue>
+#include <algorithm>
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -142,7 +143,7 @@ inline int64_t read_varint_int64(uint8_t *&ptr) noexcept
 
 inline uint8_t* read_field(uint8_t *ptr, field_t &field) noexcept
 {
-    field.id5wt3 = *ptr++;
+    field.id5wt3 = read_varint_uint64(ptr); // BUGFIX: id5wt3 is actually a varint
     field.pointer = ptr;
     switch (field.id5wt3 & 0x07) // wt
     {
@@ -644,11 +645,95 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
     });
 }
 
+bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
+{
+    // HeaderBlock
+    int64_t left{0}, right{0}, top{0}, bottom{0};
+    std::vector<std::string> required_features;
+    std::vector<std::string> optional_features;
+    std::string writing_program, source;
+    int64_t osmosis_replication_timestamp{0}, osmosis_sequence_number{0};
+    std::string osmosis_replication_base_url;
+
+    bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
+        switch(field.id5wt3)
+        {
+        case ID5WT3(1,2): // HeaderBBox
+            {
+                iterate_fields(field.pointer, field.pointer + field.length, [&left, &right, &top, &bottom](field_t& field)->bool{
+                    switch(field.id5wt3)
+                    {
+                    case ID5WT3(1,0): // left
+                        left = to_sint64(field.value_uint64);
+                        break;
+                    case ID5WT3(2,0): // right
+                        right = to_sint64(field.value_uint64);
+                        break;
+                    case ID5WT3(3,0): // top
+                        top = to_sint64(field.value_uint64);
+                        break;
+                    case ID5WT3(4,0): // bottom
+                        bottom = to_sint64(field.value_uint64);
+                        break;
+                    }
+                    return true;
+                });
+            }
+            break;
+        case ID5WT3(4,2): // required features
+            required_features.emplace_back(std::string((const char*)field.pointer, field.length));
+            break;
+        case ID5WT3(5,2): // optional features
+            optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
+            break;
+        case ID5WT3(16,2): // writing program
+            writing_program = std::string((const char*)field.pointer, field.length);
+            break;
+        case ID5WT3(17,2): // source
+            source = std::string((const char*)field.pointer, field.length);
+            break;
+        case ID5WT3(32,0): // osmosis_replication_timestamp
+            osmosis_replication_timestamp = field.value_uint64;
+            break;
+        case ID5WT3(33,0): // osmosis_replication_sequence_number
+            osmosis_sequence_number = field.value_uint64;
+            break;
+        case ID5WT3(34,0): // osmosis_replication_base_url
+            osmosis_replication_base_url = std::string((const char*)field.pointer, field.length);
+            // std::exchange(osmosis_replication_base_url, std::string((const char*)field.pointer, field.length));
+            break;
+        }
+        return true;
+    });
+
+    if(result)
+    {
+        std::cout << "header blob:\n";
+        std::cout << "left: " << left << "\n";
+        std::cout << "right: " << right << "\n";
+        std::cout << "top: " << top << "\n";
+        std::cout << "bottom: " << bottom << "\n";
+        std::cout << "required features:\n";
+        for(const auto &s: required_features)
+            std::cout << s << "\n";
+        std::cout << "optional features:\n";
+        for(const auto &s: optional_features)
+            std::cout << s << "\n";
+        std::cout << "writing_program: " << writing_program << "\n";
+        std::cout << "source: " << source << "\n";
+        std::cout << "osmosis_replication_timestamp: " << osmosis_replication_timestamp << "\n";
+        std::cout << "osmosis_sequence_number: " << osmosis_sequence_number << "\n";
+        std::cout << "osmosis_replication_base_url: " << osmosis_replication_base_url << "\n";
+    }
+    return result;
+}
+
 struct work_item
 {
     uint8_t* buffer1 = nullptr;
     size_t blob_size = 0;
     bool (*handler)(uint8_t*, uint8_t*) = nullptr;
+    size_t block_index = 0;
 };
 static std::queue<work_item> work_queue;
 static std::mutex mtx_work_queue;
@@ -658,7 +743,7 @@ bool work(size_t index) noexcept
 {
     while(1)
     {
-        thread_index = std::min(index, thread_count() - 1);
+        input_osm::thread_index = std::min(index, thread_count() - 1);
         work_item wi;
         {
             std::lock_guard<std::mutex> lck(mtx_work_queue);
@@ -667,6 +752,7 @@ bool work(size_t index) noexcept
             wi = work_queue.front();
             work_queue.pop();
         }
+        input_osm::block_index = wi.block_index;
         if(!handle_blob(wi))
             return false;
     }
@@ -720,7 +806,7 @@ bool handle_blob(work_item &wi) noexcept
     return result;
 };
 
-bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, bool (*handler)(uint8_t*, uint8_t*)) noexcept
+bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, bool (*handler)(uint8_t*, uint8_t*), size_t index) noexcept
 {
     // read BlobHeader
     uint8_t* header_buffer = buffer;
@@ -754,53 +840,75 @@ bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size,
         return false;
 
     // handle blob in its own thread
-    work_queue.push(work_item{buffer1, blob_size, handler});
+    work_queue.push(work_item{buffer1, blob_size, handler, index});
     return true;
 }
 
+static size_t g_thread_count = 0;
+void set_thread_count(size_t count)
+{
+    g_thread_count = std::min(count, static_cast<size_t>(std::thread::hardware_concurrency()));
+}
+void set_max_thread_count()
+{
+    g_thread_count = std::thread::hardware_concurrency();
+}
 size_t thread_count()
 {
-    return std::thread::hardware_concurrency();
+    return g_thread_count ? g_thread_count : 1;
 }
 
 bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
 {
-    uint8_t* file_end = file_begin + file_size;    
-    uint8_t* buf = file_begin;
-
-    // header
-    if(buf + 4 > file_end)
-        return false;
-    uint32_t header_size = read_net_uint32(buf);
-    buf += 4;
-    if(!input_blob_mem(buf, file_end, header_size, "OSMHeader", nullptr))
-        return false;
-
-    // Blobs
-    while(buf < file_end)
+    // iterate file blocks
     {
-        // header size
+        uint8_t* file_end = file_begin + file_size;    
+        uint8_t* buf = file_begin;
+        size_t index = 0;
+
+        // header blob
         if(buf + 4 > file_end)
-            break;
-        header_size = read_net_uint32(buf);
-        buf += 4;
-        // OSMData blob
-        if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block))
             return false;
+        uint32_t header_size = read_net_uint32(buf);
+        buf += 4;
+        if(!input_blob_mem(buf, file_end, header_size, "OSMHeader", read_header_block, index++))
+            return false;
+
+        // data blobs
+        while(buf < file_end)
+        {
+            // header size
+            if(buf + 4 > file_end)
+                break;
+            header_size = read_net_uint32(buf);
+            buf += 4;
+            // OSMData blob
+            if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block, index++))
+                return false;
+        }
     }
 
-    // spawn workers
-    std::vector<std::thread> worker_threads(thread_count());
-    for(size_t index{0}; index < thread_count(); index++)
+    // handle blobs
+    if(thread_count() > 1)
     {
-        worker_threads[index] = std::thread(work, index);
-    }
+        // spawn workers
+        std::vector<std::thread> worker_threads(thread_count());
+        for(size_t index{0}; index < thread_count(); index++)
+        {
+            worker_threads[index] = std::thread(work, index);
+        }
 
-    // wait them to finish
-    for(auto& th: worker_threads)
+        // wait for them to finish
+        for(auto& th: worker_threads)
+        {
+            if(th.joinable())
+                th.join();
+        }
+    }
+    else
     {
-        if(th.joinable())
-            th.join();
+        // 1 thread, so call the work function directly
+        work(0);
     }
 
     return true;

@@ -22,6 +22,7 @@ std::function<bool(span_t<way_t>)> way_handler;
 std::function<bool(span_t<relation_t>)> relation_handler;
 mode_t osc_mode;
 thread_local size_t thread_index{0};
+thread_local size_t block_index{0};
 
 bool input_pbf(const char* filename) noexcept;
 bool input_xml(const char* filename);
