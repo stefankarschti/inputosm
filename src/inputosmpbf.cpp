@@ -54,6 +54,7 @@ extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
+static constexpr bool verbose = false;
 struct field_t
 {
     uint32_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
@@ -223,7 +224,8 @@ inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
         vec.emplace_back();
         if(vec.capacity() > previous_capacity)
         {
-            printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
+            if(verbose)
+                printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
             return false;
         }
     }
@@ -452,7 +454,8 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
                     node_refs.push_back(id);
                     if(node_refs.capacity() > previous_capacity)
                     {
-                        printf("way node ref capacity exceeded: %zu/%zu on thread %zu\n", node_refs.capacity(), previous_capacity, thread_index);
+                        if(verbose)
+                            printf("way node ref capacity exceeded: %zu/%zu on thread %zu\n", node_refs.capacity(), previous_capacity, thread_index);
                         result = result_t::eoutofmem;
                         return false;
                     }
@@ -612,16 +615,16 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
 {
     thread_local std::vector<way_t> way_list(8000);
     way_list.clear();
-    thread_local std::vector<tag_t> way_tags(16000);
+    thread_local std::vector<tag_t> way_tags(32000);
     way_tags.clear();
-    thread_local std::vector<int64_t> way_node_refs(32000);
+    thread_local std::vector<int64_t> way_node_refs(64000);
     way_node_refs.clear();
 
     thread_local std::vector<relation_t> relation_list(1024);
     relation_list.clear();
-    thread_local std::vector<tag_t> relation_tags(16000);
+    thread_local std::vector<tag_t> relation_tags(32000);
     relation_tags.clear();
-    thread_local std::vector<relation_member_t> relation_members(32000);
+    thread_local std::vector<relation_member_t> relation_members(64000);
     relation_members.clear();
 
     // read elements
@@ -675,7 +678,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
             }
             return true;
         });
-        if(restart_ways || restart_relations)
+        if(verbose && (restart_ways || restart_relations))
             printf("restarting read_primitive_group on thread %zu\n", thread_index);
     }
     if(result)
@@ -712,19 +715,23 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
             break;
         case ID5WT3(17,0): // granularity in nanodegrees
             granularity = (int64_t)field.value_uint64;
-            std::cout << "granularity: " << granularity << " nanodegrees\n";
+            if(verbose)
+                std::cout << "granularity: " << granularity << " nanodegrees\n";
             break;
         case ID5WT3(18,0): // date granularity in milliseconds
             date_granularity = (int64_t)field.value_uint64;
-            std::cout << "date granularity: " << date_granularity << " milliseconds\n";
+            if(verbose)
+                std::cout << "date granularity: " << date_granularity << " milliseconds\n";
             break;
         case ID5WT3(19,0): // latitude offset in nanodegrees
             lat_offset = (int64_t)field.value_uint64;
-            std::cout << "latitude offset: " << lat_offset << " nanodegrees\n";
+            if(verbose)
+                std::cout << "latitude offset: " << lat_offset << " nanodegrees\n";
             break;
         case ID5WT3(20,0): // longitude offset in nanodegrees
             lon_offset = (int64_t)field.value_uint64;
-            std::cout << "longitude offset: " << lon_offset << " nanodegrees\n";
+            if(verbose)
+                std::cout << "longitude offset: " << lon_offset << " nanodegrees\n";
             break;
         }
         return true;
@@ -792,7 +799,7 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
         return true;
     });
 
-    if(result)
+    if(result && verbose)
     {
         std::cout << "header blob:\n";
         std::cout << "left: " << left << "\n";
