@@ -34,7 +34,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-static constexpr uint8_t ID5WT3(uint8_t id, uint8_t wt)
+static constexpr uint32_t ID5WT3(uint32_t id, uint8_t wt)
 {
     constexpr uint8_t kBitsForWT = 3u;
     constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
@@ -54,22 +54,9 @@ extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
-struct dense_info_t
-{
-    std::vector<uint32_t> version;
-    std::vector<int64_t> timestamp;
-    std::vector<int64_t> changeset;
-    void clear()
-    {
-        version.clear();
-        timestamp.clear();
-        changeset.clear();
-    }
-};
-
 struct field_t
 {
-    uint8_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
+    uint32_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
     uint8_t *pointer;
     uint64_t length;
     uint64_t value_uint64;
@@ -104,7 +91,14 @@ struct string_table_t
         return (const char*)st_buffer.data() + st_index[index];
     }
 };
+
+// This primitive block's data
 thread_local string_table_t string_table;
+thread_local int32_t granularity = 100;
+thread_local int64_t lat_offset = 0;
+thread_local int64_t lon_offset = 0;
+thread_local int32_t date_granularity = 1000;
+
 
 inline uint32_t read_net_uint32(uint8_t *buf) noexcept
 {
@@ -396,11 +390,19 @@ bool read_info(T &obj, uint8_t* ptr, uint8_t* end) noexcept
     });
 }
 
-bool read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vector<tag_t>& tags, std::vector<int64_t>& node_refs) noexcept
+enum class result_t
+{
+    ok = 0,
+    error = 1,
+    eoutofmem = 2
+};
+
+result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vector<tag_t>& tags, std::vector<int64_t>& node_refs) noexcept
 {
     way_t way;
     auto node_ref_begin = node_refs.size();
     auto tags_begin = tags.size();
+    result_t result = result_t::ok;
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -414,7 +416,10 @@ bool read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vec
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(tags, index, "way tags"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     tags[index].key = string_table.get(read_varint_uint64(ptr));
                 }
             }
@@ -425,7 +430,10 @@ bool read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vec
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(tags, index, "way tags"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     tags[index].value = string_table.get(read_varint_uint64(ptr));
                 }
             }
@@ -437,14 +445,15 @@ bool read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vec
         case ID5WT3(8,2): // node refs
             {
                 int64_t id = 0;
+                size_t previous_capacity = node_refs.capacity();
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
                 {
                     id += read_varint_sint64(ptr);
-                    size_t previous_capacity = node_refs.capacity();
                     node_refs.push_back(id);
                     if(node_refs.capacity() > previous_capacity)
                     {
                         printf("way node ref capacity exceeded: %zu/%zu on thread %zu\n", node_refs.capacity(), previous_capacity, thread_index);
+                        result = result_t::eoutofmem;
                         return false;
                     }
                 }
@@ -452,25 +461,40 @@ bool read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vec
             break;
         }
        return true;
-    })) return false;
+    }))
+    {
+        // error:
+        if(result_t::eoutofmem == result)
+        {
+            // cleanup
+            node_refs.erase(node_refs.begin() + node_ref_begin, node_refs.end());
+            tags.erase(tags.begin() + tags_begin, tags.end());
+        }
+        else
+            result = result_t::error;
+    }
+    else
+    {
+        // success:
+        // node refs
+        if(node_ref_begin != node_refs.size())
+            way.node_refs = {node_refs.data() + node_ref_begin, node_refs.size() - node_ref_begin}; 
+        // tags
+        if(tags_begin != tags.size())
+            way.tags = {tags.data() + tags_begin, tags.size() - tags_begin}; 
+        // add to list
+        way_list.emplace_back(way);
+    }
 
-    // node refs
-    if(node_ref_begin != node_refs.size())
-        way.node_refs = {node_refs.data() + node_ref_begin, node_refs.size() - node_ref_begin}; 
-    // tags
-    if(tags_begin != tags.size())
-        way.tags = {tags.data() + tags_begin, tags.size() - tags_begin}; 
-    // add to list
-    way_list.emplace_back(way);
-
-    return true;
+    return result;
 }
 
-bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, std::vector<tag_t>& tags, std::vector<relation_member_t>& members) noexcept
+result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, std::vector<tag_t>& tags, std::vector<relation_member_t>& members) noexcept
 {
     relation_t relation;
     auto tags_begin = tags.size();
     auto members_begin = members.size();
+    result_t result = result_t::ok;
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -484,7 +508,10 @@ bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(tags, index, "relation tags"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     tags[index].key = string_table.get(read_varint_uint64(ptr));
                 }
             }
@@ -495,7 +522,10 @@ bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(tags, index, "relation tags"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     tags[index].value = string_table.get(read_varint_uint64(ptr));
                 }
             }
@@ -510,7 +540,10 @@ bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(members, index, "relation members"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     members[index].role = string_table.get(read_varint_uint64(ptr));
                 }
             }
@@ -522,7 +555,10 @@ bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(members, index, "relation members"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     id += read_varint_sint64(ptr);
                     members[index].id = id;
                 }
@@ -534,73 +570,114 @@ bool read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
                 {
                     if(!check_capacity(members, index, "relation members"))
+                    {
+                        result = result_t::eoutofmem;
                         return false;
+                    }
                     members[index].type = read_varint_uint64(ptr);
                 }
             }
             break;
         }
        return true;
-    })) return false;
+    })) 
+    {
+        // error: 
+        if(result_t::eoutofmem == result)
+        {
+            // cleanup
+            tags.erase(tags.begin() + tags_begin, tags.end());
+            members.erase(members.begin() + members_begin, members.end());
+        }
+        else
+            result = result_t::error;
+    }
+    else
+    {
+        // success:
+        // tags
+        if(tags_begin != tags.size())
+            relation.tags = {tags.data() + tags_begin, tags.size() - tags_begin}; 
+        // members
+        if(members_begin != members.size())
+            relation.members = {members.data() + members_begin, members.size() - members_begin}; 
+        // add to list
+        relation_list.emplace_back(relation);
+    }
 
-    // tags
-    if(tags_begin != tags.size())
-        relation.tags = {tags.data() + tags_begin, tags.size() - tags_begin}; 
-    // members
-    if(members_begin != members.size())
-        relation.members = {members.data() + members_begin, members.size() - members_begin}; 
-    // add to list
-    relation_list.emplace_back(relation);
-
-    return true;
+    return result;
 }
 
 bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
 {
-    // FIXME: dynamically adapt to higher element counts
     thread_local std::vector<way_t> way_list(8000);
     way_list.clear();
-    thread_local std::vector<tag_t> way_tags(256000);
+    thread_local std::vector<tag_t> way_tags(16000);
     way_tags.clear();
-    thread_local std::vector<int64_t> way_node_refs(2048000);
+    thread_local std::vector<int64_t> way_node_refs(32000);
     way_node_refs.clear();
 
     thread_local std::vector<relation_t> relation_list(1024);
     relation_list.clear();
-    thread_local std::vector<tag_t> relation_tags(256000);
+    thread_local std::vector<tag_t> relation_tags(16000);
     relation_tags.clear();
-    thread_local std::vector<relation_member_t> relation_members(512000);
+    thread_local std::vector<relation_member_t> relation_members(32000);
     relation_members.clear();
 
-    bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
-        {
-        case ID5WT3(1,2): // node
-            break;
-        case ID5WT3(2,2): // dense nodes
-            if(node_handler)
+    // read elements
+    size_t nodes_read{0}, ways_read{0}, relations_read{0};
+    bool restart_ways = true;
+    bool restart_relations = true;
+    bool result = true;
+    while(restart_ways || restart_relations)
+    {
+        restart_ways = restart_relations = false;
+        size_t node_index{0}, way_index{0}, relation_index{0};
+        result = iterate_fields(ptr, end, [&](field_t& field)->bool{
+            switch(field.id5wt3)
             {
-                if(!read_dense_nodes(field.pointer, field.pointer + field.length))
-                    return false;
+            case ID5WT3(1,2): // node
+                break;
+            case ID5WT3(2,2): // dense nodes
+                if(node_index++ >= nodes_read && node_handler)
+                {
+                    if(!read_dense_nodes(field.pointer, field.pointer + field.length))
+                        return false;
+                    nodes_read++;
+                }
+                break;
+            case ID5WT3(3,2): // way
+                if(way_index++ >= ways_read && way_handler)
+                {
+                    switch(read_way(field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
+                    {
+                        case result_t::eoutofmem:
+                            restart_ways = true;
+                        case result_t::error:
+                            return false;
+                    }
+                    ways_read++;
+                }
+                break;
+            case ID5WT3(4,2): // relation
+                if(relation_index++ >= relations_read && relation_handler)
+                {
+                    switch(read_relation(field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
+                    {
+                        case result_t::eoutofmem:
+                            restart_ways = true;
+                        case result_t::error:
+                            return false;
+                    }
+                    relations_read++;
+                }
+                break;
             }
-            break;
-        case ID5WT3(3,2): // way
-            if(way_handler)
-            {
-                if(!read_way(field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
-                    return false;
-            }
-            break;
-        case ID5WT3(4,2): // relation
-            if(relation_handler)
-            {
-                if(!read_relation(field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
-                    return false;
-            }
-            break;
-        }
-        return true;
-    });
+            return true;
+        });
+        if(restart_ways || restart_relations)
+            printf("restarting read_primitive_group on thread %zu\n", thread_index);
+    }
     if(result)
     {
         // report ways
@@ -620,6 +697,7 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
 {
     // PrimitiveBlock
     string_table.clear();
+
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
@@ -633,12 +711,20 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
                 return false;
             break;
         case ID5WT3(17,0): // granularity in nanodegrees
+            granularity = (int64_t)field.value_uint64;
+            std::cout << "granularity: " << granularity << " nanodegrees\n";
             break;
         case ID5WT3(18,0): // date granularity in milliseconds
+            date_granularity = (int64_t)field.value_uint64;
+            std::cout << "date granularity: " << date_granularity << " milliseconds\n";
             break;
         case ID5WT3(19,0): // latitude offset in nanodegrees
+            lat_offset = (int64_t)field.value_uint64;
+            std::cout << "latitude offset: " << lat_offset << " nanodegrees\n";
             break;
         case ID5WT3(20,0): // longitude offset in nanodegrees
+            lon_offset = (int64_t)field.value_uint64;
+            std::cout << "longitude offset: " << lon_offset << " nanodegrees\n";
             break;
         }
         return true;
