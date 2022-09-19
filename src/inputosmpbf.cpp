@@ -25,6 +25,7 @@
 #include <memory>
 #include <queue>
 #include <algorithm>
+#include <iomanip>
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -54,7 +55,7 @@ extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
-static constexpr bool verbose = false;
+static constexpr bool verbose = true;
 struct field_t
 {
     uint32_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
@@ -615,16 +616,16 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
 {
     thread_local std::vector<way_t> way_list(8000);
     way_list.clear();
-    thread_local std::vector<tag_t> way_tags(32000);
+    thread_local std::vector<tag_t> way_tags(256000);
     way_tags.clear();
-    thread_local std::vector<int64_t> way_node_refs(64000);
+    thread_local std::vector<int64_t> way_node_refs(1024000);
     way_node_refs.clear();
 
     thread_local std::vector<relation_t> relation_list(1024);
     relation_list.clear();
     thread_local std::vector<tag_t> relation_tags(32000);
     relation_tags.clear();
-    thread_local std::vector<relation_member_t> relation_members(64000);
+    thread_local std::vector<relation_member_t> relation_members(128000);
     relation_members.clear();
 
     // read elements
@@ -753,7 +754,7 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
         {
         case ID5WT3(1,2): // HeaderBBox
             {
-                iterate_fields(field.pointer, field.pointer + field.length, [&left, &right, &top, &bottom](field_t& field)->bool{
+                if(!iterate_fields(field.pointer, field.pointer + field.length, [&left, &right, &top, &bottom](field_t& field)->bool{
                     switch(field.id5wt3)
                     {
                     case ID5WT3(1,0): // left
@@ -770,54 +771,56 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                         break;
                     }
                     return true;
-                });
+                }))
+                    return false;
+                if(verbose)
+                {
+                    std::cout << "left: " << left << "\n";
+                    std::cout << "right: " << right << "\n";
+                    std::cout << "top: " << top << "\n";
+                    std::cout << "bottom: " << bottom << "\n";
+                }
             }
             break;
         case ID5WT3(4,2): // required features
             required_features.emplace_back(std::string((const char*)field.pointer, field.length));
+            if(verbose)
+                std::cout << "required feature: " << required_features.back() << "\n";
             break;
         case ID5WT3(5,2): // optional features
             optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
+            if(verbose)
+                std::cout << "optional feature: " << optional_features.back() << "\n";
             break;
         case ID5WT3(16,2): // writing program
             writing_program = std::string((const char*)field.pointer, field.length);
+            if(verbose)
+                std::cout << "writing_program: " << writing_program << "\n";
             break;
         case ID5WT3(17,2): // source
             source = std::string((const char*)field.pointer, field.length);
+            if(verbose)
+                std::cout << "source: " << source << "\n";
             break;
         case ID5WT3(32,0): // osmosis_replication_timestamp
             osmosis_replication_timestamp = field.value_uint64;
+            if(verbose)
+                std::cout << "osmosis_replication_timestamp: " << osmosis_replication_timestamp << " \"" << std::put_time(std::gmtime(&osmosis_replication_timestamp), "%Y-%m-%d %X %Z") << "\"\n";
             break;
         case ID5WT3(33,0): // osmosis_replication_sequence_number
             osmosis_sequence_number = field.value_uint64;
+            if(verbose)
+                std::cout << "osmosis_sequence_number: " << osmosis_sequence_number << "\n";
             break;
         case ID5WT3(34,0): // osmosis_replication_base_url
             osmosis_replication_base_url = std::string((const char*)field.pointer, field.length);
-            // std::exchange(osmosis_replication_base_url, std::string((const char*)field.pointer, field.length));
+            if(verbose)
+                std::cout << "osmosis_replication_base_url: " << osmosis_replication_base_url << "\n";
             break;
         }
         return true;
     });
 
-    if(result && verbose)
-    {
-        std::cout << "header blob:\n";
-        std::cout << "left: " << left << "\n";
-        std::cout << "right: " << right << "\n";
-        std::cout << "top: " << top << "\n";
-        std::cout << "bottom: " << bottom << "\n";
-        std::cout << "required features:\n";
-        for(const auto &s: required_features)
-            std::cout << s << "\n";
-        std::cout << "optional features:\n";
-        for(const auto &s: optional_features)
-            std::cout << s << "\n";
-        std::cout << "writing_program: " << writing_program << "\n";
-        std::cout << "source: " << source << "\n";
-        std::cout << "osmosis_replication_timestamp: " << osmosis_replication_timestamp << "\n";
-        std::cout << "osmosis_sequence_number: " << osmosis_sequence_number << "\n";
-        std::cout << "osmosis_replication_base_url: " << osmosis_replication_base_url << "\n";
-    }
     return result;
 }
 
