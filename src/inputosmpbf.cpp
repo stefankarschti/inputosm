@@ -43,7 +43,7 @@ extern std::function<bool(span_t<relation_t>)> relation_handler;
 static constexpr bool verbose = true;
 struct field_t
 {
-    uint32_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
+    uint32_t key; // https://developers.google.com/protocol-buffers/docs/encoding#structure
     uint8_t *pointer;
     uint64_t length;
     uint64_t value_uint64;
@@ -87,11 +87,11 @@ thread_local int64_t lon_offset = 0;
 thread_local int32_t date_granularity = 1000;
 
 
-static constexpr uint32_t ID5WT3(uint32_t id, uint8_t wt)
+static constexpr uint32_t KEY(uint32_t field_number, uint8_t wire_type)
 {
     constexpr uint8_t kBitsForWT = 3u;
     constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
-    return (id << kBitsForWT) | (wt & kMaskForWT);
+    return (field_number << kBitsForWT) | (wire_type & kMaskForWT);
 }
 
 inline uint32_t read_net_uint32(uint8_t *buf) noexcept
@@ -131,9 +131,9 @@ inline int64_t read_varint_int64(uint8_t *&ptr) noexcept
 
 inline uint8_t* read_field(uint8_t *ptr, field_t &field) noexcept
 {
-    field.id5wt3 = read_varint_uint64(ptr); // BUGFIX: id5wt3 is actually a varint
+    field.key = read_varint_uint64(ptr); // BUGFIX: id5wt3 is actually a varint
     field.pointer = ptr;
-    switch (field.id5wt3 & 0x07) // wt
+    switch (field.key & 0x07) // wt
     {
     case 0: // varint
         field.value_uint64 = read_varint_uint64(ptr);
@@ -202,7 +202,7 @@ inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler) noexce
 inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
-        if(field.id5wt3 == ID5WT3(1, 2)) // string
+        if(field.key == KEY(1, 2)) // string
             string_table.add(field.pointer, field.length);
         return true;
     }); 
@@ -233,9 +233,9 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
     tags.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,2): // node ids. delta encoded
+        case KEY(1,2): // node ids. delta encoded
             {
                 int64_t id = 0;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
@@ -246,13 +246,13 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 }
             }
             break;
-        case ID5WT3(5,2): // dense infos
+        case KEY(5,2): // dense infos
             if(decode_metadata)
             {
                 iterate_fields(field.pointer, field.pointer + field.length, [](field_t& field)->bool{
-                    switch(field.id5wt3)
+                    switch(field.key)
                     {
-                    case ID5WT3(1,2): // versions. not delta encoded
+                    case KEY(1,2): // versions. not delta encoded
                         {
                             auto inode = node_list.begin();
                             for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
@@ -261,7 +261,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                             }
                         }
                         break;
-                    case ID5WT3(2,2): // timestamps. delta encoded
+                    case KEY(2,2): // timestamps. delta encoded
                         {
                             int64_t timestamp = 0;
                             auto inode = node_list.begin();
@@ -272,7 +272,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                             }
                         }
                         break;
-                    case ID5WT3(3,2): // changesets. delta encoded
+                    case KEY(3,2): // changesets. delta encoded
                         {
                             int64_t changeset = 0;
                             auto inode = node_list.begin();
@@ -288,7 +288,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 });
             }
             break;
-        case ID5WT3(8,2): // latitudes. delta encoded
+        case KEY(8,2): // latitudes. delta encoded
             {
                 int64_t latitude = 0;
                 auto inode = node_list.begin();
@@ -299,7 +299,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 }
             }
             break;
-        case ID5WT3(9,2): // longitudes. delta encoded
+        case KEY(9,2): // longitudes. delta encoded
             {
                 int64_t longitude = 0;
                 auto inode = node_list.begin();
@@ -310,7 +310,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                 }
             }
             break;
-        case ID5WT3(10,2): // packed indexes to keys & values
+        case KEY(10,2): // packed indexes to keys & values
             {
                 bool invalid = true;
                 while(invalid)
@@ -369,15 +369,15 @@ template <class T>
 bool read_info(T &obj, uint8_t* ptr, uint8_t* end) noexcept
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,0): // version
+        case KEY(1,0): // version
             obj.version = field.value_uint64;
             break;
-        case ID5WT3(2,0): // timestamp
+        case KEY(2,0): // timestamp
             obj.timestamp = field.value_uint64;
             break;
-        case ID5WT3(3,0): // changeset
+        case KEY(3,0): // changeset
             obj.changeset = field.value_uint64;
             break;
         }
@@ -400,12 +400,12 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
     result_t result = result_t::ok;
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,0): // way id
+        case KEY(1,0): // way id
             way.id = field.value_uint64;
             break;
-        case ID5WT3(2,2): // packed keys
+        case KEY(2,2): // packed keys
             {
                 int index = tags_begin;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -419,7 +419,7 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
                 }
             }
             break;
-        case ID5WT3(3,2): // packed values
+        case KEY(3,2): // packed values
             {
                 int index = tags_begin;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -433,11 +433,11 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
                 }
             }
             break;
-        case ID5WT3(4,2): // way info
+        case KEY(4,2): // way info
             if(decode_metadata)
                 read_info<way_t>(way, field.pointer, field.pointer + field.length);
             break;
-        case ID5WT3(8,2): // node refs
+        case KEY(8,2): // node refs
             {
                 int64_t id = 0;
                 size_t previous_capacity = node_refs.capacity();
@@ -493,12 +493,12 @@ result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& rela
     result_t result = result_t::ok;
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,0): // relation id
+        case KEY(1,0): // relation id
             relation.id = field.value_uint64;
             break;
-        case ID5WT3(2,2): // packed keys
+        case KEY(2,2): // packed keys
             {
                 int index = tags_begin;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -512,7 +512,7 @@ result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& rela
                 }
             }
             break;
-        case ID5WT3(3,2): // packed values
+        case KEY(3,2): // packed values
             {
                 int index = tags_begin;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -526,11 +526,11 @@ result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& rela
                 }
             }
             break;
-        case ID5WT3(4,2): // relation info
+        case KEY(4,2): // relation info
             if(decode_metadata)
                 read_info<relation_t>(relation, field.pointer, field.pointer + field.length);
             break;
-        case ID5WT3(8,2): // member roles
+        case KEY(8,2): // member roles
             {
                 int index = members_begin;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -544,7 +544,7 @@ result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& rela
                 }
             }
             break;
-        case ID5WT3(9,2): // member ids
+        case KEY(9,2): // member ids
             {
                 int index = members_begin;
                 int64_t id = 0;
@@ -560,7 +560,7 @@ result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& rela
                 }
             }
             break;
-        case ID5WT3(10,2): // member types
+        case KEY(10,2): // member types
             {
                 int index = members_begin;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -630,11 +630,11 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
         restart_ways = restart_relations = false;
         size_t node_index{0}, way_index{0}, relation_index{0};
         result = iterate_fields(ptr, end, [&](field_t& field)->bool{
-            switch(field.id5wt3)
+            switch(field.key)
             {
-            case ID5WT3(1,2): // node
+            case KEY(1,2): // node
                 break;
-            case ID5WT3(2,2): // dense nodes
+            case KEY(2,2): // dense nodes
                 if(node_index++ >= nodes_read && node_handler)
                 {
                     if(!read_dense_nodes(field.pointer, field.pointer + field.length))
@@ -642,7 +642,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
                     nodes_read++;
                 }
                 break;
-            case ID5WT3(3,2): // way
+            case KEY(3,2): // way
                 if(way_index++ >= ways_read && way_handler)
                 {
                     switch(read_way(field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
@@ -655,7 +655,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
                     ways_read++;
                 }
                 break;
-            case ID5WT3(4,2): // relation
+            case KEY(4,2): // relation
                 if(relation_index++ >= relations_read && relation_handler)
                 {
                     switch(read_relation(field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
@@ -695,33 +695,33 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
     string_table.clear();
 
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,2): // string table
+        case KEY(1,2): // string table
             string_table.init(field.length);
             if(!read_string_table(field.pointer, field.pointer + field.length))
                 return false;
             break;
-        case ID5WT3(2,2): // primitive group
+        case KEY(2,2): // primitive group
             if(!read_primitive_group(field.pointer, field.pointer + field.length))
                 return false;
             break;
-        case ID5WT3(17,0): // granularity in nanodegrees
+        case KEY(17,0): // granularity in nanodegrees
             granularity = (int64_t)field.value_uint64;
             if(verbose)
                 std::cout << "granularity: " << granularity << " nanodegrees\n";
             break;
-        case ID5WT3(18,0): // date granularity in milliseconds
+        case KEY(18,0): // date granularity in milliseconds
             date_granularity = (int64_t)field.value_uint64;
             if(verbose)
                 std::cout << "date granularity: " << date_granularity << " milliseconds\n";
             break;
-        case ID5WT3(19,0): // latitude offset in nanodegrees
+        case KEY(19,0): // latitude offset in nanodegrees
             lat_offset = (int64_t)field.value_uint64;
             if(verbose)
                 std::cout << "latitude offset: " << lat_offset << " nanodegrees\n";
             break;
-        case ID5WT3(20,0): // longitude offset in nanodegrees
+        case KEY(20,0): // longitude offset in nanodegrees
             lon_offset = (int64_t)field.value_uint64;
             if(verbose)
                 std::cout << "longitude offset: " << lon_offset << " nanodegrees\n";
@@ -742,23 +742,23 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
     std::string osmosis_replication_base_url;
 
     bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,2): // HeaderBBox
+        case KEY(1,2): // HeaderBBox
             {
                 if(!iterate_fields(field.pointer, field.pointer + field.length, [&left, &right, &top, &bottom](field_t& field)->bool{
-                    switch(field.id5wt3)
+                    switch(field.key)
                     {
-                    case ID5WT3(1,0): // left
+                    case KEY(1,0): // left
                         left = to_sint64(field.value_uint64);
                         break;
-                    case ID5WT3(2,0): // right
+                    case KEY(2,0): // right
                         right = to_sint64(field.value_uint64);
                         break;
-                    case ID5WT3(3,0): // top
+                    case KEY(3,0): // top
                         top = to_sint64(field.value_uint64);
                         break;
-                    case ID5WT3(4,0): // bottom
+                    case KEY(4,0): // bottom
                         bottom = to_sint64(field.value_uint64);
                         break;
                     }
@@ -774,37 +774,37 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                 }
             }
             break;
-        case ID5WT3(4,2): // required features
+        case KEY(4,2): // required features
             required_features.emplace_back(std::string((const char*)field.pointer, field.length));
             if(verbose)
                 std::cout << "required feature: " << required_features.back() << "\n";
             break;
-        case ID5WT3(5,2): // optional features
+        case KEY(5,2): // optional features
             optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
             if(verbose)
                 std::cout << "optional feature: " << optional_features.back() << "\n";
             break;
-        case ID5WT3(16,2): // writing program
+        case KEY(16,2): // writing program
             writing_program = std::string((const char*)field.pointer, field.length);
             if(verbose)
                 std::cout << "writing_program: " << writing_program << "\n";
             break;
-        case ID5WT3(17,2): // source
+        case KEY(17,2): // source
             source = std::string((const char*)field.pointer, field.length);
             if(verbose)
                 std::cout << "source: " << source << "\n";
             break;
-        case ID5WT3(32,0): // osmosis_replication_timestamp
+        case KEY(32,0): // osmosis_replication_timestamp
             osmosis_replication_timestamp = field.value_uint64;
             if(verbose)
                 std::cout << "osmosis_replication_timestamp: " << osmosis_replication_timestamp << " \"" << std::put_time(std::gmtime(&osmosis_replication_timestamp), "%Y-%m-%d %X %Z") << "\"\n";
             break;
-        case ID5WT3(33,0): // osmosis_replication_sequence_number
+        case KEY(33,0): // osmosis_replication_sequence_number
             osmosis_sequence_number = field.value_uint64;
             if(verbose)
                 std::cout << "osmosis_sequence_number: " << osmosis_sequence_number << "\n";
             break;
-        case ID5WT3(34,0): // osmosis_replication_base_url
+        case KEY(34,0): // osmosis_replication_base_url
             osmosis_replication_base_url = std::string((const char*)field.pointer, field.length);
             if(verbose)
                 std::cout << "osmosis_replication_base_url: " << osmosis_replication_base_url << "\n";
@@ -856,16 +856,16 @@ bool handle_blob(work_item &wi) noexcept
     uint8_t *raw_ptr = nullptr;
     uint64_t raw_size = 0;
     iterate_fields(wi.buffer1, wi.buffer1 + wi.blob_size, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,2): // raw
+        case KEY(1,2): // raw
             raw_size = field.length;
             raw_ptr = field.pointer;
             break;
-        case ID5WT3(2,0): // raw size
+        case KEY(2,0): // raw size
             raw_size = field.value_uint64;
             break;
-        case ID5WT3(3,2): // zlib_data
+        case KEY(3,2): // zlib_data
             zip_sz = field.length;
             zip_ptr = field.pointer;
             break;
@@ -907,12 +907,12 @@ bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size,
     uint64_t blob_size = 0;
     size_t expected_type_len = strlen(expected_type);
     iterate_fields(header_buffer, header_buffer + header_size, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+        switch(field.key)
         {
-        case ID5WT3(1,2): // type
+        case KEY(1,2): // type
             expected_header_found = (field.length == expected_type_len) && (memcmp(field.pointer, expected_type, expected_type_len) == 0);
             break;
-        case ID5WT3(3,0): // datasize
+        case KEY(3,0): // datasize
             blob_size = field.value_uint64;
             break;
         }
