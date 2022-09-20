@@ -35,7 +35,7 @@ namespace input_osm {
  * @link https://developers.google.com/protocol-buffers/docs/encoding#structure @endlink
  */
 
-extern bool decode_metadata, decode_node_coord;
+extern bool decode_metadata;
 extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;

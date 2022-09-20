@@ -24,7 +24,7 @@
 
 namespace input_osm {
 
-extern bool decode_metadata, decode_node_coord;
+extern bool decode_metadata;
 extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
@@ -69,12 +69,12 @@ xml_start_node(const char **attr)
             double longitude = atof(attr[i + 1]);
             current_node.raw_longitude = longitude * 10000000;
         }
-        // if(strcmp(attr[i], "version") == 0)
-        //     current_node.version = atoi(attr[i + 1]);
-        // if(strcmp(attr[i], "changeset") == 0)
-        //     current_node.changeset = atoll(attr[i + 1]);
-        // if(strcmp(attr[i], "timestamp") == 0)
-        //     current_node.timestamp = str_to_timestamp(attr[i + 1]);
+        if(strcmp(attr[i], "version") == 0)
+            current_node.version = atoi(attr[i + 1]);
+        if(strcmp(attr[i], "changeset") == 0)
+            current_node.changeset = atoll(attr[i + 1]);
+        if(strcmp(attr[i], "timestamp") == 0)
+            current_node.timestamp = str_to_timestamp(attr[i + 1]);
     }
 }
 
@@ -100,12 +100,12 @@ xml_start_way(const char **attr)
     {
         if(strcmp(attr[i], "id") == 0)
             current_way.id = atoll(attr[i + 1]);
-        // if(strcmp(attr[i], "version") == 0)
-        //     current_way.version = atoi(attr[i + 1]);
-        // if(strcmp(attr[i], "changeset") == 0)
-        //     current_way.changeset = atoll(attr[i + 1]);
-        // if(strcmp(attr[i], "timestamp") == 0)
-        //     current_way.timestamp = str_to_timestamp(attr[i + 1]);
+        if(strcmp(attr[i], "version") == 0)
+            current_way.version = atoi(attr[i + 1]);
+        if(strcmp(attr[i], "changeset") == 0)
+            current_way.changeset = atoll(attr[i + 1]);
+        if(strcmp(attr[i], "timestamp") == 0)
+            current_way.timestamp = str_to_timestamp(attr[i + 1]);
     }
 }
 
@@ -133,12 +133,12 @@ xml_start_relation(const char **attr)
     {
         if(strcmp(attr[i], "id") == 0)
             current_relation.id = atoll(attr[i + 1]);
-        // if(strcmp(attr[i], "version") == 0)
-        //     current_relation.version = atoi(attr[i + 1]);
-        // if(strcmp(attr[i], "changeset") == 0)
-        //     current_relation.changeset = atoll(attr[i + 1]);
-        // if(strcmp(attr[i], "timestamp") == 0)
-        //     current_relation.timestamp = str_to_timestamp(attr[i + 1]);
+        if(strcmp(attr[i], "version") == 0)
+            current_relation.version = atoi(attr[i + 1]);
+        if(strcmp(attr[i], "changeset") == 0)
+            current_relation.changeset = atoll(attr[i + 1]);
+        if(strcmp(attr[i], "timestamp") == 0)
+            current_relation.timestamp = str_to_timestamp(attr[i + 1]);
     }
 }
 
@@ -280,7 +280,7 @@ bool input_xml(const char* filename)
         fclose(f);
         return false;
     }
-    XML_SetElementHandler (parser, xml_start_tag, xml_end_tag);
+    XML_SetElementHandler(parser, xml_start_tag, xml_end_tag);
     const size_t BUFFSIZE = 8192;
     char xml_buff[BUFFSIZE + 1];
     int done = 0;
