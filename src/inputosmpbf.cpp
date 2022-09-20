@@ -12,35 +12,20 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
+
+#include <cstdint>
 #include <cstring>
-#include <cstdio>
-#include <functional>
 #include <vector>
 #include <zlib.h>
 #include <thread>
-#include <atomic>
-#include <chrono>
 #include <iostream>
 #include <mutex>
-#include <memory>
 #include <queue>
-#include <algorithm>
 #include <iomanip>
 
-#include <stdio.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <stdlib.h>
 #include <sys/mman.h>
-
-static constexpr uint32_t ID5WT3(uint32_t id, uint8_t wt)
-{
-    constexpr uint8_t kBitsForWT = 3u;
-    constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
-    return (id << kBitsForWT) | (wt & kMaskForWT);
-}
 
 namespace input_osm {
 
@@ -101,6 +86,13 @@ thread_local int64_t lat_offset = 0;
 thread_local int64_t lon_offset = 0;
 thread_local int32_t date_granularity = 1000;
 
+
+static constexpr uint32_t ID5WT3(uint32_t id, uint8_t wt)
+{
+    constexpr uint8_t kBitsForWT = 3u;
+    constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
+    return (id << kBitsForWT) | (wt & kMaskForWT);
+}
 
 inline uint32_t read_net_uint32(uint8_t *buf) noexcept
 {
@@ -456,7 +448,7 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
                     if(node_refs.capacity() > previous_capacity)
                     {
                         if(verbose)
-                            printf("way node ref capacity exceeded: %zu/%zu on thread %zu\n", node_refs.capacity(), previous_capacity, thread_index);
+                            std::cout << "way node ref capacity exceeded: " << node_refs.capacity() << "/" << previous_capacity << " on thread " << thread_index << "\n";
                         result = result_t::eoutofmem;
                         return false;
                     }
