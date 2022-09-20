@@ -47,6 +47,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    std::cout.imbue(std::locale(""));
     std::cout << "nodes: " << std::accumulate(node_count.begin(), node_count.end(), 0LLU) << "\n";
     std::cout << "ways: " << std::accumulate(way_count.begin(), way_count.end(), 0LLU) << "\n";
     std::cout << "relations: " << std::accumulate(relation_count.begin(), relation_count.end(), 0LLU) << "\n";

@@ -219,9 +219,9 @@ inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
 template <typename T>
 inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
 {
+    size_t previous_capacity = vec.capacity();
     while(index >= vec.size())
     {
-        size_t previous_capacity = vec.capacity();
         vec.emplace_back();
         if(vec.capacity() > previous_capacity)
         {
@@ -775,10 +775,10 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                     return false;
                 if(verbose)
                 {
-                    std::cout << "left: " << left << "\n";
-                    std::cout << "right: " << right << "\n";
-                    std::cout << "top: " << top << "\n";
-                    std::cout << "bottom: " << bottom << "\n";
+                    std::cout << "left: " << std::fixed << std::setprecision(9) << left / 1e9 << "\n";
+                    std::cout << "right: " << std::fixed << std::setprecision(9) << right / 1e9 << "\n";
+                    std::cout << "top: " << std::fixed << std::setprecision(9) << top / 1e9 << "\n";
+                    std::cout << "bottom: " << std::fixed << std::setprecision(9) << bottom / 1e9 << "\n";
                 }
             }
             break;
@@ -961,8 +961,20 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
         uint8_t* file_end = file_begin + file_size;    
         uint8_t* buf = file_begin;
         size_t index = 0;
+        std::locale old_locale;
+
+        if(verbose)
+        {
+            old_locale = std::cout.imbue(std::locale(""));
+            std::cout << "file size is " << file_size << " bytes\n";
+        }
 
         // header blob
+        if(verbose)
+        {
+            std::cout << "\rreading block " << index;
+            std::flush(std::cout);
+        }
         if(buf + 4 > file_end)
             return false;
         uint32_t header_size = read_net_uint32(buf);
@@ -973,6 +985,11 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
         // data blobs
         while(buf < file_end)
         {
+            if(verbose)
+            {
+                std::cout << "\rreading block " << index << " offset " << buf - file_begin;
+                std::flush(std::cout);
+            }
             // header size
             if(buf + 4 > file_end)
                 break;
@@ -981,6 +998,11 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
             // OSMData blob
             if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block, index++))
                 return false;
+        }
+        if(verbose)
+        {
+            std::cout << "\nblock work queue has " << work_queue.size() << " items\n";
+            std::cout.imbue(old_locale);
         }
     }
 
