@@ -20,6 +20,7 @@
 #include <functional>
 
 namespace input_osm {
+
 struct tag_t
 {
     const char* key = nullptr;
@@ -37,6 +38,7 @@ struct node_t
     int32_t changeset = 0;
 };
 static_assert(sizeof(node_t) <= 64);
+
 struct way_t
 {
     int64_t id = 0;
@@ -47,6 +49,7 @@ struct way_t
     int32_t changeset = 0;
 };
 static_assert(sizeof(way_t) <= 64);
+
 struct relation_member_t
 {
     /**
@@ -89,8 +92,11 @@ bool input_file(const char* filename,
                 bool decode_metadata,
                 std::function<bool(span_t<node_t>)> node_handler,
                 std::function<bool(span_t<way_t>)> way_handler,
-                std::function<bool(span_t<relation_t>)> relation_handler);
+                std::function<bool(span_t<relation_t>)> relation_handler) noexcept;
 extern thread_local size_t thread_index;
+extern thread_local size_t block_index;
+void set_thread_count(size_t);
+void set_max_thread_count();
 size_t thread_count();
 
 } // namespace

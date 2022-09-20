@@ -24,6 +24,8 @@
 #include <mutex>
 #include <memory>
 #include <queue>
+#include <algorithm>
+#include <iomanip>
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -33,7 +35,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-static constexpr uint8_t ID5WT3(uint8_t id, uint8_t wt)
+static constexpr uint32_t ID5WT3(uint32_t id, uint8_t wt)
 {
     constexpr uint8_t kBitsForWT = 3u;
     constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
@@ -53,22 +55,10 @@ extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
-struct dense_info_t
-{
-    std::vector<uint32_t> version;
-    std::vector<int64_t> timestamp;
-    std::vector<int64_t> changeset;
-    void clear()
-    {
-        version.clear();
-        timestamp.clear();
-        changeset.clear();
-    }
-};
-
+static constexpr bool verbose = true;
 struct field_t
 {
-    uint8_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
+    uint32_t id5wt3; // https://developers.google.com/protocol-buffers/docs/encoding#structure
     uint8_t *pointer;
     uint64_t length;
     uint64_t value_uint64;
@@ -76,9 +66,14 @@ struct field_t
 
 struct string_table_t
 {
-    std::vector<size_t> st_index;
+    std::vector<uint32_t> st_index;
     std::vector<uint8_t> st_buffer;
 
+    void clear()
+    {
+        st_buffer.clear();
+        st_index.clear();
+    }
     void init(size_t byte_size)
     {
         st_buffer.clear();
@@ -99,18 +94,20 @@ struct string_table_t
     }
 };
 
-struct fixup_t
-{
-    size_t begin = 0;
-    size_t end = 0;
-};
+// This primitive block's data
+thread_local string_table_t string_table;
+thread_local int32_t granularity = 100;
+thread_local int64_t lat_offset = 0;
+thread_local int64_t lon_offset = 0;
+thread_local int32_t date_granularity = 1000;
 
-inline uint32_t read_net_uint32(uint8_t *buf)
+
+inline uint32_t read_net_uint32(uint8_t *buf) noexcept
 {
     return ((uint32_t)(buf[0]) << 24u) | ((uint32_t)(buf[1]) << 16u) | ((uint32_t)(buf[2]) << 8u) | ((uint32_t)(buf[3]));
 }
 
-inline uint64_t read_varint_uint64(uint8_t *&ptr)
+inline uint64_t read_varint_uint64(uint8_t *&ptr) noexcept
 {
     uint64_t v64 = 0;
     unsigned shift = 0;
@@ -125,24 +122,24 @@ inline uint64_t read_varint_uint64(uint8_t *&ptr)
     return v64;
 }
 
-inline int64_t to_sint64(uint64_t v64)
+inline int64_t to_sint64(uint64_t v64) noexcept
 {
     return (v64 & 1) ? -(int64_t)((v64 + 1) / 2) : (v64 + 1) / 2;
 }
 
-inline uint64_t read_varint_sint64(uint8_t *&ptr)
+inline uint64_t read_varint_sint64(uint8_t *&ptr) noexcept
 {
     return to_sint64(read_varint_uint64(ptr));
 }
 
-inline int64_t read_varint_int64(uint8_t *&ptr)
+inline int64_t read_varint_int64(uint8_t *&ptr) noexcept
 {
     return (int64_t)read_varint_uint64(ptr);
 }
 
-inline uint8_t* read_field(uint8_t *ptr, field_t &field)
+inline uint8_t* read_field(uint8_t *ptr, field_t &field) noexcept
 {
-    field.id5wt3 = *ptr++;
+    field.id5wt3 = read_varint_uint64(ptr); // BUGFIX: id5wt3 is actually a varint
     field.pointer = ptr;
     switch (field.id5wt3 & 0x07) // wt
     {
@@ -170,33 +167,33 @@ inline uint8_t* read_field(uint8_t *ptr, field_t &field)
     return ptr;
 }
 
-inline bool unzip_compressed_block(uint8_t *zip_ptr, size_t zip_sz, uint8_t *raw_ptr, size_t raw_sz)
+inline bool unzip_compressed_block(uint8_t *zip_ptr, size_t zip_sz, uint8_t *raw_ptr, size_t raw_sz) noexcept
 {
     uLongf size = raw_sz;
     int ret = uncompress(raw_ptr, &size, zip_ptr, zip_sz);
     return ret == Z_OK && size == raw_sz;
 }
 
-inline void read_sint64_packed(std::vector<int64_t>& packed, uint8_t* ptr, uint8_t* end)
+inline void read_sint64_packed(std::vector<int64_t>& packed, uint8_t* ptr, uint8_t* end) noexcept
 {
     while(ptr < end)
         packed.emplace_back(read_varint_sint64(ptr));
 }
 
-inline void read_sint32_packed(std::vector<int32_t>& packed, uint8_t* ptr, uint8_t* end)
+inline void read_sint32_packed(std::vector<int32_t>& packed, uint8_t* ptr, uint8_t* end) noexcept
 {
     while(ptr < end)
         packed.emplace_back(read_varint_sint64(ptr));
 }
 
-inline void read_uint32_packed(std::vector<uint32_t>& packed, uint8_t* ptr, uint8_t* end)
+inline void read_uint32_packed(std::vector<uint32_t>& packed, uint8_t* ptr, uint8_t* end) noexcept
 {
     while(ptr < end)
         packed.emplace_back(read_varint_uint64(ptr));
 }
 
 template <typename Handler>
-inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
+inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler) noexcept
 {
     while(ptr < end)
     {
@@ -210,7 +207,7 @@ inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler)
     return true;
 }
 
-bool read_string_table(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         if(field.id5wt3 == ID5WT3(1, 2)) // string
@@ -219,106 +216,149 @@ bool read_string_table(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
     }); 
 }
 
-bool read_dense_infos(dense_info_t &node_infos, uint8_t* ptr, uint8_t* end)
+template <typename T>
+inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
 {
-    return iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
+    while(index >= vec.size())
+    {
+        size_t previous_capacity = vec.capacity();
+        vec.emplace_back();
+        if(vec.capacity() > previous_capacity)
         {
-        case ID5WT3(1,2): // versions. not delta encoded
-            read_uint32_packed(node_infos.version, field.pointer, field.pointer + field.length);
-            break;
-        case ID5WT3(2,2): // timestamps. delta encoded
-            read_sint64_packed(node_infos.timestamp, field.pointer, field.pointer + field.length);
-            break;
-        case ID5WT3(3,2): // changesets. delta encoded
-            read_sint64_packed(node_infos.changeset, field.pointer, field.pointer + field.length);
-            break;
+            if(verbose)
+                printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
+            return false;
         }
-        return true;
-    });
+    }
+    return true;
 }
 
-bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
 {
-    thread_local std::vector<node_t> node_list;
+    thread_local std::vector<node_t> node_list(16000);
     node_list.clear();
-    thread_local std::vector<tag_t> tags;
+    thread_local std::vector<tag_t> tags(256000);
     tags.clear();
-    thread_local std::vector<fixup_t> node_tag_fixup;
-    node_tag_fixup.clear();
-    thread_local dense_info_t node_infos;
-    node_infos.clear();
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
-        case ID5WT3(1,2): // node ids
+        case ID5WT3(1,2): // node ids. delta encoded
             {
-                int64_t id = 0;                
+                int64_t id = 0;
                 for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
                 {
-                    node_list.push_back(node_t());
                     id += read_varint_sint64(ptr);
+                    node_list.emplace_back();
                     node_list.back().id = id;
                 }
             }
             break;
         case ID5WT3(5,2): // dense infos
             if(decode_metadata)
-                read_dense_infos(node_infos, field.pointer, field.pointer + field.length);
+            {
+                iterate_fields(field.pointer, field.pointer + field.length, [](field_t& field)->bool{
+                    switch(field.id5wt3)
+                    {
+                    case ID5WT3(1,2): // versions. not delta encoded
+                        {
+                            auto inode = node_list.begin();
+                            for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
+                            {
+                                inode->version = read_varint_uint64(ptr);
+                            }
+                        }
+                        break;
+                    case ID5WT3(2,2): // timestamps. delta encoded
+                        {
+                            int64_t timestamp = 0;
+                            auto inode = node_list.begin();
+                            for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
+                            {
+                                timestamp += read_varint_sint64(ptr);
+                                inode->timestamp = timestamp;
+                            }
+                        }
+                        break;
+                    case ID5WT3(3,2): // changesets. delta encoded
+                        {
+                            int64_t changeset = 0;
+                            auto inode = node_list.begin();
+                            for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
+                            {
+                                changeset += read_varint_sint64(ptr);
+                                inode->changeset = changeset;
+                            }
+                        }
+                        break;
+                    }
+                    return true;
+                });
+            }
             break;
-        case ID5WT3(8,2): // latitudes
+        case ID5WT3(8,2): // latitudes. delta encoded
             {
                 int64_t latitude = 0;
-                size_t i = 0;
-                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                auto inode = node_list.begin();
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
                 {
                     latitude += read_varint_sint64(ptr);
-                    node_list[i++].raw_latitude = latitude;
+                    inode->raw_latitude = latitude;
                 }
             }
             break;
-        case ID5WT3(9,2): // longitudes
+        case ID5WT3(9,2): // longitudes. delta encoded
             {
                 int64_t longitude = 0;
-                size_t i = 0;
-                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                auto inode = node_list.begin();
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end(); inode++)
                 {
                     longitude += read_varint_sint64(ptr);
-                    node_list[i++].raw_latitude = longitude;
+                    inode->raw_longitude = longitude;
                 }
             }
             break;
         case ID5WT3(10,2): // packed indexes to keys & values
             {
-                size_t i = 0;
-                fixup_t f{0, 0};
-                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                bool invalid = true;
+                while(invalid)
                 {
-                    uint32_t istring = read_varint_uint64(ptr);
-                    if(!istring)
+                    invalid = false;
+                    tags.clear();
+                    auto itag_start = tags.begin();
+                    auto inode = node_list.begin();
+                    size_t previous_capacity = tags.capacity();
+                    size_t tags_size = tags.size();
+                    for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
                     {
-                        ++i;
-                        f.end = tags.size();
-                        node_tag_fixup.push_back(f);
-                        f.begin = f.end;
-                        continue;
+                        // read key
+                        uint32_t istring = read_varint_uint64(ptr);
+                        if(!istring)
+                        {
+                            // finish up current node
+                            if(itag_start != tags.end())
+                            {
+                                inode->tags = span_t{&(*itag_start), static_cast<size_t>(tags.end() - itag_start)};
+                            }
+                            itag_start = tags.end();
+                            ++inode;
+                            continue;
+                        }
+                        // add to tags
+                        tags.emplace_back();
+                        ++tags_size;
+                        // get key
+                        tags.back().key = string_table.get(istring);
+                        // read value
+                        tags.back().value = string_table.get(read_varint_uint64(ptr));
+                        // check for invalidity
+                        if(tags_size > previous_capacity)
+                        {
+                            // all references to tags are invalid. restart.
+                            invalid = true;
+                            break;
+                        }
                     }
-                    const char* pkey = string_table.get(istring);
-                    istring = read_varint_uint64(ptr);
-                    if(!istring)
-                    {
-                        ++i;
-                        f.end = tags.size();
-                        node_tag_fixup.push_back(f);
-                        f.begin = f.end;
-                        continue;
-                    }
-                    const char* pval = string_table.get(istring);
-                    tags.emplace_back(tag_t{pkey, pval});
-                    f.end = tags.size();
-                    node_tag_fixup.push_back(f);
-                    f.begin = f.end;
                 }
             }
             break;
@@ -327,50 +367,45 @@ bool read_dense_nodes(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
     }))
         return false;
 
-    // fixup tag pointers
-    for(auto i = 0; i < node_list.size(); ++i)
-    {
-        node_t& n = node_list[i];
-        n.tags = {tags.data() + node_tag_fixup[i].begin, node_tag_fixup[i].end - node_tag_fixup[i].begin };
-    }
-    // report the node list
-    if(node_handler)
-        if(!node_handler(span_t{node_list.data(), node_list.size()}))
-            return false;
+    // report nodes
+    if(!node_handler(span_t{node_list.data(), node_list.size()}))
+        return false;
     return true;;
 }
 
 template <class T>
-bool read_info(T &obj, uint8_t* ptr, uint8_t* end)
+bool read_info(T &obj, uint8_t* ptr, uint8_t* end) noexcept
 {
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
         case ID5WT3(1,0): // version
-            // obj.version = field.value_uint64;
+            obj.version = field.value_uint64;
             break;
         case ID5WT3(2,0): // timestamp
-            // obj.timestamp = field.value_uint64;
+            obj.timestamp = field.value_uint64;
             break;
         case ID5WT3(3,0): // changeset
-            // obj.changeset = field.value_uint64;
+            obj.changeset = field.value_uint64;
             break;
         }
         return true;
     });
 }
 
-bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, 
-    std::vector<tag_t>& tags, std::vector<fixup_t>& tags_fixup, 
-    std::vector<int64_t>& node_refs, std::vector<fixup_t>& node_refs_fixup)
+enum class result_t
+{
+    ok = 0,
+    error = 1,
+    eoutofmem = 2
+};
+
+result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std::vector<tag_t>& tags, std::vector<int64_t>& node_refs) noexcept
 {
     way_t way;
-    thread_local std::vector<uint32_t> ikey;
-    ikey.clear();
-    thread_local std::vector<uint32_t> ivalue;
-    ivalue.clear();
-    fixup_t f;
-    f.begin = node_refs.size();
+    auto node_ref_begin = node_refs.size();
+    auto tags_begin = tags.size();
+    result_t result = result_t::ok;
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -379,67 +414,91 @@ bool read_way(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vec
             way.id = field.value_uint64;
             break;
         case ID5WT3(2,2): // packed keys
-            read_uint32_packed(ikey, field.pointer, field.pointer + field.length);
+            {
+                int index = tags_begin;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(tags, index, "way tags"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    tags[index].key = string_table.get(read_varint_uint64(ptr));
+                }
+            }
             break;
         case ID5WT3(3,2): // packed values
-            read_uint32_packed(ivalue, field.pointer, field.pointer + field.length);
+            {
+                int index = tags_begin;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(tags, index, "way tags"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    tags[index].value = string_table.get(read_varint_uint64(ptr));
+                }
+            }
             break;
         case ID5WT3(4,2): // way info
             if(decode_metadata)
                 read_info<way_t>(way, field.pointer, field.pointer + field.length);
             break;
-        case ID5WT3(8,2): // node ids
-            read_sint64_packed(node_refs, field.pointer, field.pointer + field.length);
+        case ID5WT3(8,2): // node refs
+            {
+                int64_t id = 0;
+                size_t previous_capacity = node_refs.capacity();
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length;)
+                {
+                    id += read_varint_sint64(ptr);
+                    node_refs.push_back(id);
+                    if(node_refs.capacity() > previous_capacity)
+                    {
+                        if(verbose)
+                            printf("way node ref capacity exceeded: %zu/%zu on thread %zu\n", node_refs.capacity(), previous_capacity, thread_index);
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                }
+            }
             break;
         }
        return true;
-    })) return false;
-
-    if(ikey.size() != ivalue.size())
-        return false;
-
-    // decode way
+    }))
     {
-        // node refs
-        int64_t current = 0;
-        for(auto i = f.begin; i < node_refs.size(); ++i)
+        // error:
+        if(result_t::eoutofmem == result)
         {
-            auto &n = node_refs[i];
-            current += n;
-            n = current;
-        } 
-        f.end = node_refs.size();
-        node_refs_fixup.emplace_back(f);
-        // tags
-        f.begin = tags.size();
-        for(size_t i = 0; i < ikey.size(); ++i)
-        {
-            tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
+            // cleanup
+            node_refs.erase(node_refs.begin() + node_ref_begin, node_refs.end());
+            tags.erase(tags.begin() + tags_begin, tags.end());
         }
-        f.end = tags.size();
-        tags_fixup.emplace_back(f);
+        else
+            result = result_t::error;
+    }
+    else
+    {
+        // success:
+        // node refs
+        if(node_ref_begin != node_refs.size())
+            way.node_refs = {node_refs.data() + node_ref_begin, node_refs.size() - node_ref_begin}; 
+        // tags
+        if(tags_begin != tags.size())
+            way.tags = {tags.data() + tags_begin, tags.size() - tags_begin}; 
         // add to list
-        way_list.push_back(way);
+        way_list.emplace_back(way);
     }
 
-    return true;
+    return result;
 }
 
-bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, 
-    std::vector<tag_t>& tags, std::vector<fixup_t>& tags_fixup,
-    std::vector<relation_member_t>& members, std::vector<fixup_t>& members_fixup)
+result_t read_relation(uint8_t* ptr, uint8_t* end, std::vector<relation_t>& relation_list, std::vector<tag_t>& tags, std::vector<relation_member_t>& members) noexcept
 {
     relation_t relation;
-    thread_local std::vector<uint32_t> ikey;
-    ikey.clear();
-    thread_local std::vector<uint32_t> ivalue;
-    ivalue.clear();
-    thread_local std::vector<uint32_t> member_role;
-    member_role.clear();
-    thread_local std::vector<int64_t> member_id;
-    member_id.clear();
-    thread_local std::vector<uint32_t> member_type;
-    member_type.clear();
+    auto tags_begin = tags.size();
+    auto members_begin = members.size();
+    result_t result = result_t::ok;
 
     if(!iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
@@ -448,141 +507,189 @@ bool read_relation(string_table_t &string_table, uint8_t* ptr, uint8_t* end, std
             relation.id = field.value_uint64;
             break;
         case ID5WT3(2,2): // packed keys
-            read_uint32_packed(ikey, field.pointer, field.pointer + field.length);
+            {
+                int index = tags_begin;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(tags, index, "relation tags"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    tags[index].key = string_table.get(read_varint_uint64(ptr));
+                }
+            }
             break;
         case ID5WT3(3,2): // packed values
-            read_uint32_packed(ivalue, field.pointer, field.pointer + field.length);
+            {
+                int index = tags_begin;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(tags, index, "relation tags"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    tags[index].value = string_table.get(read_varint_uint64(ptr));
+                }
+            }
             break;
         case ID5WT3(4,2): // relation info
             if(decode_metadata)
                 read_info<relation_t>(relation, field.pointer, field.pointer + field.length);
             break;
         case ID5WT3(8,2): // member roles
-            read_uint32_packed(member_role, field.pointer, field.pointer + field.length);
+            {
+                int index = members_begin;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(members, index, "relation members"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    members[index].role = string_table.get(read_varint_uint64(ptr));
+                }
+            }
             break;
         case ID5WT3(9,2): // member ids
-            read_sint64_packed(member_id, field.pointer, field.pointer + field.length);
+            {
+                int index = members_begin;
+                int64_t id = 0;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(members, index, "relation members"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    id += read_varint_sint64(ptr);
+                    members[index].id = id;
+                }
+            }
             break;
         case ID5WT3(10,2): // member types
-            read_uint32_packed(member_type, field.pointer, field.pointer + field.length);
+            {
+                int index = members_begin;
+                for(auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
+                {
+                    if(!check_capacity(members, index, "relation members"))
+                    {
+                        result = result_t::eoutofmem;
+                        return false;
+                    }
+                    members[index].type = read_varint_uint64(ptr);
+                }
+            }
             break;
         }
        return true;
-    })) return false;
-
-    if(ikey.size() != ivalue.size())
-        return false;
-    if((member_id.size() != member_role.size()) || (member_id.size() != member_role.size()))
-        return false;
-
-    // decode relation
+    })) 
     {
+        // error: 
+        if(result_t::eoutofmem == result)
+        {
+            // cleanup
+            tags.erase(tags.begin() + tags_begin, tags.end());
+            members.erase(members.begin() + members_begin, members.end());
+        }
+        else
+            result = result_t::error;
+    }
+    else
+    {
+        // success:
         // tags
-        fixup_t f;
-        f.begin = tags.size();
-        for(size_t i = 0; i < ikey.size(); ++i)
-        {
-            tags.emplace_back(tag_t{string_table.get(ikey[i]), string_table.get(ivalue[i])});
-        }
-        f.end = tags.size();
-        tags_fixup.emplace_back(f);
+        if(tags_begin != tags.size())
+            relation.tags = {tags.data() + tags_begin, tags.size() - tags_begin}; 
         // members
-        f.begin = members.size();
-        int64_t current = 0;
-        for(size_t i = 0; i < member_id.size(); ++i)
-        {
-            relation_member_t mem;
-            current += member_id[i];
-            mem.id = current;
-            mem.role = string_table.get(member_role[i]);
-            mem.type = member_type[i];
-            members.emplace_back(mem);
-        }
-        f.end = members.size();
-        members_fixup.emplace_back(f);
+        if(members_begin != members.size())
+            relation.members = {members.data() + members_begin, members.size() - members_begin}; 
         // add to list
-        relation_list.push_back(relation);
+        relation_list.emplace_back(relation);
     }
 
-    return true;
+    return result;
 }
 
-bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* end)
+bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
 {
-    thread_local std::vector<way_t> way_list;
+    thread_local std::vector<way_t> way_list(8000);
     way_list.clear();
-    thread_local std::vector<tag_t> way_tags;
+    thread_local std::vector<tag_t> way_tags(256000);
     way_tags.clear();
-    thread_local std::vector<fixup_t> way_tags_fixup;
-    way_tags_fixup.clear();
-    thread_local std::vector<int64_t> way_node_refs;
+    thread_local std::vector<int64_t> way_node_refs(1024000);
     way_node_refs.clear();
-    thread_local std::vector<fixup_t> way_node_refs_fixup;
-    way_node_refs_fixup.clear();
 
-    thread_local std::vector<relation_t> relation_list;
+    thread_local std::vector<relation_t> relation_list(1024);
     relation_list.clear();
-    thread_local std::vector<tag_t> relation_tags;
+    thread_local std::vector<tag_t> relation_tags(32000);
     relation_tags.clear();
-    thread_local std::vector<fixup_t> relation_tags_fixup;
-    relation_tags_fixup.clear();
-    thread_local std::vector<relation_member_t> relation_members;
+    thread_local std::vector<relation_member_t> relation_members(128000);
     relation_members.clear();
-    thread_local std::vector<fixup_t> relation_members_fixup;
-    relation_members_fixup.clear();
 
-    bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
-        switch(field.id5wt3)
-        {
-        case ID5WT3(1,2): // node
-            break;
-        case ID5WT3(2,2): // dense nodes
-            if(node_handler)
+    // read elements
+    size_t nodes_read{0}, ways_read{0}, relations_read{0};
+    bool restart_ways = true;
+    bool restart_relations = true;
+    bool result = true;
+    while(restart_ways || restart_relations)
+    {
+        restart_ways = restart_relations = false;
+        size_t node_index{0}, way_index{0}, relation_index{0};
+        result = iterate_fields(ptr, end, [&](field_t& field)->bool{
+            switch(field.id5wt3)
             {
-                if(!read_dense_nodes(string_table, field.pointer, field.pointer + field.length))
-                    return false;
+            case ID5WT3(1,2): // node
+                break;
+            case ID5WT3(2,2): // dense nodes
+                if(node_index++ >= nodes_read && node_handler)
+                {
+                    if(!read_dense_nodes(field.pointer, field.pointer + field.length))
+                        return false;
+                    nodes_read++;
+                }
+                break;
+            case ID5WT3(3,2): // way
+                if(way_index++ >= ways_read && way_handler)
+                {
+                    switch(read_way(field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
+                    {
+                        case result_t::eoutofmem:
+                            restart_ways = true;
+                        case result_t::error:
+                            return false;
+                    }
+                    ways_read++;
+                }
+                break;
+            case ID5WT3(4,2): // relation
+                if(relation_index++ >= relations_read && relation_handler)
+                {
+                    switch(read_relation(field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
+                    {
+                        case result_t::eoutofmem:
+                            restart_ways = true;
+                        case result_t::error:
+                            return false;
+                    }
+                    relations_read++;
+                }
+                break;
             }
-            break;
-        case ID5WT3(3,2): // way
-            if(way_handler)
-            {
-                if(!read_way(string_table, field.pointer, field.pointer + field.length, way_list, way_tags, way_tags_fixup, way_node_refs, way_node_refs_fixup))
-                    return false;
-            }
-            break;
-        case ID5WT3(4,2): // relation
-            if(relation_handler)
-            {
-                if(!read_relation(string_table, field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_tags_fixup, relation_members, relation_members_fixup))
-                    return false;
-            }
-            break;
-        }
-        return true;
-    });
+            return true;
+        });
+        if(verbose && (restart_ways || restart_relations))
+            printf("restarting read_primitive_group on thread %zu\n", thread_index);
+    }
     if(result)
     {
-        for(auto i{0}; i < way_list.size(); ++i)
-        {
-            way_t& w = way_list[i];
-            // fixup way tag pointers
-            w.tags = {way_tags.data() + way_tags_fixup[i].begin, way_tags_fixup[i].end - way_tags_fixup[i].begin };
-            // fixup way node ref pointers
-            w.node_refs = {way_node_refs.data() + way_node_refs_fixup[i].begin, way_node_refs_fixup[i].end - way_node_refs_fixup[i].begin };
-        }
-        // report way list
+        // report ways
         if(way_handler)
             if(!way_handler(span_t{way_list.data(), way_list.size()}))
                 return false;
-        for(auto i{0}; i < relation_list.size(); ++i)
-        {
-            relation_t& r = relation_list[i];
-            // fixup relation tag pointers
-            r.tags = {relation_tags.data() + relation_tags_fixup[i].begin, relation_tags_fixup[i].end - relation_tags_fixup[i].begin };
-            // fixup relation member pointers
-            r.members = {relation_members.data() + relation_members_fixup[i].begin, relation_members_fixup[i].end - relation_members_fixup[i].begin };
-        }
-        // report relation list
+        
+        // report relations
         if(relation_handler)
             if(!relation_handler(span_t{relation_list.data(), relation_list.size()}))
                 return false;
@@ -590,39 +697,212 @@ bool read_primitive_group(string_table_t &string_table, uint8_t* ptr, uint8_t* e
     return result;
 }
 
-bool read_primitve_block(uint8_t* ptr, uint8_t* end)
+bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
 {
     // PrimitiveBlock
-    thread_local string_table_t string_table;
-    string_table.init(end - ptr);
+    string_table.clear();
+
     return iterate_fields(ptr, end, [&](field_t& field)->bool{
         switch(field.id5wt3)
         {
         case ID5WT3(1,2): // string table
-            if(!read_string_table(string_table, field.pointer, field.pointer + field.length))
+            string_table.init(field.length);
+            if(!read_string_table(field.pointer, field.pointer + field.length))
                 return false;
             break;
         case ID5WT3(2,2): // primitive group
-            if(!read_primitive_group(string_table, field.pointer, field.pointer + field.length))
+            if(!read_primitive_group(field.pointer, field.pointer + field.length))
                 return false;
             break;
         case ID5WT3(17,0): // granularity in nanodegrees
+            granularity = (int64_t)field.value_uint64;
+            if(verbose)
+                std::cout << "granularity: " << granularity << " nanodegrees\n";
             break;
         case ID5WT3(18,0): // date granularity in milliseconds
+            date_granularity = (int64_t)field.value_uint64;
+            if(verbose)
+                std::cout << "date granularity: " << date_granularity << " milliseconds\n";
             break;
         case ID5WT3(19,0): // latitude offset in nanodegrees
+            lat_offset = (int64_t)field.value_uint64;
+            if(verbose)
+                std::cout << "latitude offset: " << lat_offset << " nanodegrees\n";
             break;
         case ID5WT3(20,0): // longitude offset in nanodegrees
+            lon_offset = (int64_t)field.value_uint64;
+            if(verbose)
+                std::cout << "longitude offset: " << lon_offset << " nanodegrees\n";
             break;
         }
         return true;
     });
 }
 
-static std::queue<std::function<bool()>> work_queue;
+bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
+{
+    // HeaderBlock
+    int64_t left{0}, right{0}, top{0}, bottom{0};
+    std::vector<std::string> required_features;
+    std::vector<std::string> optional_features;
+    std::string writing_program, source;
+    int64_t osmosis_replication_timestamp{0}, osmosis_sequence_number{0};
+    std::string osmosis_replication_base_url;
+
+    bool result = iterate_fields(ptr, end, [&](field_t& field)->bool{
+        switch(field.id5wt3)
+        {
+        case ID5WT3(1,2): // HeaderBBox
+            {
+                if(!iterate_fields(field.pointer, field.pointer + field.length, [&left, &right, &top, &bottom](field_t& field)->bool{
+                    switch(field.id5wt3)
+                    {
+                    case ID5WT3(1,0): // left
+                        left = to_sint64(field.value_uint64);
+                        break;
+                    case ID5WT3(2,0): // right
+                        right = to_sint64(field.value_uint64);
+                        break;
+                    case ID5WT3(3,0): // top
+                        top = to_sint64(field.value_uint64);
+                        break;
+                    case ID5WT3(4,0): // bottom
+                        bottom = to_sint64(field.value_uint64);
+                        break;
+                    }
+                    return true;
+                }))
+                    return false;
+                if(verbose)
+                {
+                    std::cout << "left: " << left << "\n";
+                    std::cout << "right: " << right << "\n";
+                    std::cout << "top: " << top << "\n";
+                    std::cout << "bottom: " << bottom << "\n";
+                }
+            }
+            break;
+        case ID5WT3(4,2): // required features
+            required_features.emplace_back(std::string((const char*)field.pointer, field.length));
+            if(verbose)
+                std::cout << "required feature: " << required_features.back() << "\n";
+            break;
+        case ID5WT3(5,2): // optional features
+            optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
+            if(verbose)
+                std::cout << "optional feature: " << optional_features.back() << "\n";
+            break;
+        case ID5WT3(16,2): // writing program
+            writing_program = std::string((const char*)field.pointer, field.length);
+            if(verbose)
+                std::cout << "writing_program: " << writing_program << "\n";
+            break;
+        case ID5WT3(17,2): // source
+            source = std::string((const char*)field.pointer, field.length);
+            if(verbose)
+                std::cout << "source: " << source << "\n";
+            break;
+        case ID5WT3(32,0): // osmosis_replication_timestamp
+            osmosis_replication_timestamp = field.value_uint64;
+            if(verbose)
+                std::cout << "osmosis_replication_timestamp: " << osmosis_replication_timestamp << " \"" << std::put_time(std::gmtime(&osmosis_replication_timestamp), "%Y-%m-%d %X %Z") << "\"\n";
+            break;
+        case ID5WT3(33,0): // osmosis_replication_sequence_number
+            osmosis_sequence_number = field.value_uint64;
+            if(verbose)
+                std::cout << "osmosis_sequence_number: " << osmosis_sequence_number << "\n";
+            break;
+        case ID5WT3(34,0): // osmosis_replication_base_url
+            osmosis_replication_base_url = std::string((const char*)field.pointer, field.length);
+            if(verbose)
+                std::cout << "osmosis_replication_base_url: " << osmosis_replication_base_url << "\n";
+            break;
+        }
+        return true;
+    });
+
+    return result;
+}
+
+struct work_item
+{
+    uint8_t* buffer1 = nullptr;
+    size_t blob_size = 0;
+    bool (*handler)(uint8_t*, uint8_t*) = nullptr;
+    size_t block_index = 0;
+};
+static std::queue<work_item> work_queue;
 static std::mutex mtx_work_queue;
 
-bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, std::function<bool(uint8_t*, uint8_t*)> handler)
+bool handle_blob(work_item &wi) noexcept;
+bool work(size_t index) noexcept
+{
+    while(1)
+    {
+        input_osm::thread_index = std::min(index, thread_count() - 1);
+        work_item wi;
+        {
+            std::lock_guard<std::mutex> lck(mtx_work_queue);
+            if(work_queue.empty())
+                return true;
+            wi = work_queue.front();
+            work_queue.pop();
+        }
+        input_osm::block_index = wi.block_index;
+        if(!handle_blob(wi))
+            return false;
+    }
+    return true;
+}
+
+bool handle_blob(work_item &wi) noexcept
+{
+    // Blob
+    thread_local std::vector<uint8_t> buffer2;
+    uint8_t *zip_ptr = nullptr;
+    uint64_t zip_sz = 0;
+    uint8_t *raw_ptr = nullptr;
+    uint64_t raw_size = 0;
+    iterate_fields(wi.buffer1, wi.buffer1 + wi.blob_size, [&](field_t& field)->bool{
+        switch(field.id5wt3)
+        {
+        case ID5WT3(1,2): // raw
+            raw_size = field.length;
+            raw_ptr = field.pointer;
+            break;
+        case ID5WT3(2,0): // raw size
+            raw_size = field.value_uint64;
+            break;
+        case ID5WT3(3,2): // zlib_data
+            zip_sz = field.length;
+            zip_ptr = field.pointer;
+            break;
+        }
+        return true;
+    });
+
+    // unzip if necessary
+    if(zip_ptr && zip_sz && raw_size)
+    {
+        assert(zip_ptr >= wi.buffer1 && zip_ptr < wi.buffer1 + wi.blob_size);
+        assert(zip_ptr + zip_sz <= wi.buffer1 + wi.blob_size);
+        if(buffer2.size() < raw_size)
+            buffer2.resize(raw_size);
+        raw_ptr = buffer2.data();
+        if(!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
+        {
+            return false;
+        }
+    }
+
+    // use blob data
+    bool result = true;
+    if(wi.handler)
+        result = wi.handler(raw_ptr, raw_ptr + raw_size);
+    return result;
+};
+
+bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size, const char* expected_type, bool (*handler)(uint8_t*, uint8_t*), size_t index) noexcept
 {
     // read BlobHeader
     uint8_t* header_buffer = buffer;
@@ -655,126 +935,82 @@ bool input_blob_mem(uint8_t* &buffer, uint8_t* buffer_end, uint32_t header_size,
     if(buffer > buffer_end)
         return false;
 
-    auto handle_blob = [buffer1, blob_size, handler]()->bool
-    {
-        // Blob
-        thread_local std::vector<uint8_t> buffer2;
-        uint8_t *zip_ptr = nullptr;
-        uint64_t zip_sz = 0;
-        uint8_t *raw_ptr = nullptr;
-        uint64_t raw_size = 0;
-        iterate_fields(buffer1, buffer1 + blob_size, [&](field_t& field)->bool{
-            switch(field.id5wt3)
-            {
-            case ID5WT3(1,2): // raw
-                raw_size = field.length;
-                raw_ptr = field.pointer;
-                break;
-            case ID5WT3(2,0): // raw size
-                raw_size = field.value_uint64;
-                break;
-            case ID5WT3(3,2): // zlib_data
-                zip_sz = field.length;
-                zip_ptr = field.pointer;
-                break;
-            }
-            return true;
-        });
-
-        // unzip if necessary
-        if(zip_ptr && zip_sz && raw_size)
-        {
-            assert(zip_ptr >= buffer1 && zip_ptr < buffer1 + blob_size);
-            assert(zip_ptr + zip_sz <= buffer1 + blob_size);
-            if(buffer2.size() < raw_size)
-                buffer2.resize(raw_size);
-            raw_ptr = buffer2.data();
-            if(!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
-            {
-                return false;
-            }
-        }
-
-        // use blob data
-        bool result = true;
-        if(handler)
-            result = handler(raw_ptr, raw_ptr + raw_size);
-        return result;
-    };
-
     // handle blob in its own thread
-    work_queue.push(handle_blob);
+    work_queue.push(work_item{buffer1, blob_size, handler, index});
     return true;
 }
 
+static size_t g_thread_count = 0;
+void set_thread_count(size_t count)
+{
+    g_thread_count = std::min(count, static_cast<size_t>(std::thread::hardware_concurrency()));
+}
+void set_max_thread_count()
+{
+    g_thread_count = std::thread::hardware_concurrency();
+}
 size_t thread_count()
 {
-    return std::thread::hardware_concurrency();
+    return g_thread_count ? g_thread_count : 1;
 }
 
-bool work(size_t index)
+bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
 {
-    while(1)
+    // iterate file blocks
     {
-        thread_index = std::min(index, thread_count() - 1);
-        std::function<bool()> handler;
-        {
-            std::lock_guard<std::mutex> lck(mtx_work_queue);
-            if(work_queue.empty())
-                return true;
-            handler = work_queue.front();
-            work_queue.pop();
-        }
-        if(!handler())
-            return false;
-    }
-    return true;
-}
+        uint8_t* file_end = file_begin + file_size;    
+        uint8_t* buf = file_begin;
+        size_t index = 0;
 
-bool input_mem(uint8_t* file_begin, size_t file_size)
-{
-    uint8_t* file_end = file_begin + file_size;    
-    uint8_t* buf = file_begin;
-
-    // header
-    if(buf + 4 > file_end)
-        return false;
-    uint32_t header_size = read_net_uint32(buf);
-    buf += 4;
-    if(!input_blob_mem(buf, file_end, header_size, "OSMHeader", nullptr))
-        return false;
-
-    // Blobs
-    while(buf < file_end)
-    {
-        // header size
+        // header blob
         if(buf + 4 > file_end)
-            break;
-        header_size = read_net_uint32(buf);
-        buf += 4;
-        // OSMData blob
-        if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block))
             return false;
+        uint32_t header_size = read_net_uint32(buf);
+        buf += 4;
+        if(!input_blob_mem(buf, file_end, header_size, "OSMHeader", read_header_block, index++))
+            return false;
+
+        // data blobs
+        while(buf < file_end)
+        {
+            // header size
+            if(buf + 4 > file_end)
+                break;
+            header_size = read_net_uint32(buf);
+            buf += 4;
+            // OSMData blob
+            if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block, index++))
+                return false;
+        }
     }
 
-    // spawn workers
-    std::vector<std::thread> worker_threads(thread_count());
-    for(size_t index{0}; index < thread_count(); index++)
+    // handle blobs
+    if(thread_count() > 1)
     {
-        worker_threads[index] = std::thread(work, index);
-    }
+        // spawn workers
+        std::vector<std::thread> worker_threads(thread_count());
+        for(size_t index{0}; index < thread_count(); index++)
+        {
+            worker_threads[index] = std::thread(work, index);
+        }
 
-    // wait them to finish
-    for(auto& th: worker_threads)
+        // wait for them to finish
+        for(auto& th: worker_threads)
+        {
+            if(th.joinable())
+                th.join();
+        }
+    }
+    else
     {
-        if(th.joinable())
-            th.join();
+        // 1 thread, so call the work function directly
+        work(0);
     }
 
     return true;
 }
 
-bool input_pbf(const char* filename)
+bool input_pbf(const char* filename) noexcept
 {
     struct stat mmapstat;
     if(stat(filename, &mmapstat) == -1)
