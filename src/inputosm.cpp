@@ -13,6 +13,7 @@
 
 #include <inputosm/inputosm.h>
 #include <cstring>
+#include <filesystem>
 
 namespace input_osm {
 
@@ -23,6 +24,7 @@ std::function<bool(span_t<relation_t>)> relation_handler;
 mode_t osc_mode;
 thread_local size_t thread_index{0};
 thread_local size_t block_index{0};
+file_type_t file_type{file_type_t::xml};
 
 bool input_pbf(const char* filename) noexcept;
 bool input_xml(const char* filename);
@@ -37,30 +39,30 @@ bool input_file(const char* filename,
     input_osm::node_handler = std::move(node_handler);
     input_osm::way_handler = way_handler;
     input_osm::relation_handler = relation_handler;
-    osc_mode = mode_t::bulk;
+    input_osm::osc_mode = mode_t::bulk;
+    input_osm::file_type = file_type_t::xml;
+    input_osm::thread_index = 0;
+    input_osm::block_index = 0;
     bool result = false;
 
     if(!filename)
 	    return false;
 
     size_t len = strlen(filename);
-    file_type_t type;
-    if(len > 4 && strcasecmp(filename + len - 4, ".osm") == 0)
+    namespace fs = std::filesystem;
+    const char* extension = fs::path(filename).extension().c_str();
+    if(0 == strcasecmp(extension, ".osm") or 0 == strcasecmp(extension, ".osc"))
     {
-    	type = file_type_t::xml;
+    	input_osm::file_type = file_type_t::xml;
     }
-    else if (len > 4 && strcasecmp(filename + len - 4, ".pbf") == 0)
+    else if(0 == strcasecmp(extension, ".pbf"))
     {	
-    	type = file_type_t::pbf;
-    }
-    else if (len > 4 && strcasecmp(filename + len - 4, ".osc") == 0)
-    {   
-    	type = file_type_t::xml;
+    	input_osm::file_type = file_type_t::pbf;
     }
     else
 	    return false;
 
-    switch(type) 
+    switch(input_osm::file_type) 
     {
         case file_type_t::pbf:
             result = input_pbf(filename);

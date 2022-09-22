@@ -44,11 +44,20 @@ int main(int argc, char **argv)
     std::vector<int32_t> relation_timestamp(input_osm::thread_count(), 0);
 
     std::vector<size_t> block_index(input_osm::thread_count(), 0);
+    
+    std::vector<uint64_t> node_with_tags_count(input_osm::thread_count(), 0);
+    std::vector<uint64_t> ways_with_tags_count(input_osm::thread_count(), 0);
+    std::vector<uint64_t> relations_with_tags_count(input_osm::thread_count(), 0);
+
+    std::vector<int64_t> max_node_id(input_osm::thread_count(), 0);
+    std::vector<int64_t> max_way_id(input_osm::thread_count(), 0);
+    std::vector<int64_t> max_relation_id(input_osm::thread_count(), 0);
 
     if (!input_osm::input_file(
             path,
             read_metadata,
-            [&node_count, &max_node_count, &max_node_tag_count, &node_timestamp, &block_index](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool
+            [&node_count, &max_node_count, &max_node_tag_count, &node_timestamp, &block_index, &node_with_tags_count, &max_node_id]
+            (input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool
             { 
                 auto cnt = node_list.size();
                 node_count[input_osm::thread_index] += cnt;
@@ -62,9 +71,15 @@ int main(int argc, char **argv)
                 for(auto &n: node_list)
                     node_timestamp[input_osm::thread_index] = std::max(node_timestamp[input_osm::thread_index], n.timestamp);
                 block_index[input_osm::thread_index] = std::max(block_index[input_osm::thread_index], input_osm::block_index);
+                for(auto &n: node_list)
+                    if(!n.tags.empty())
+                        node_with_tags_count[input_osm::thread_index]++;
+                for(auto &n: node_list)
+                    max_node_id[input_osm::thread_index] = std::max(max_node_id[input_osm::thread_index], n.id);
                 return true; 
             },
-            [&way_count, &max_way_count, &max_way_tag_count, &max_way_node_count, &way_timestamp, &block_index](input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool
+            [&way_count, &max_way_count, &max_way_tag_count, &max_way_node_count, &way_timestamp, &block_index, &ways_with_tags_count, &max_way_id]
+            (input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool
             {
                 auto cnt = way_list.size();
                 way_count[input_osm::thread_index] += cnt;
@@ -83,9 +98,15 @@ int main(int argc, char **argv)
                 for(auto &w: way_list)
                     way_timestamp[input_osm::thread_index] = std::max(way_timestamp[input_osm::thread_index], w.timestamp);
                 block_index[input_osm::thread_index] = std::max(block_index[input_osm::thread_index], input_osm::block_index);
+                for(auto &w: way_list)
+                    if(!w.tags.empty())
+                        ways_with_tags_count[input_osm::thread_index]++;
+                for(auto &w: way_list)
+                    max_way_id[input_osm::thread_index] = std::max(max_way_id[input_osm::thread_index], w.id);
                 return true;
             },
-            [&relation_count, &max_relation_count, &max_relation_tag_count, &max_relation_member_count, &relation_timestamp, &block_index](input_osm::span_t<input_osm::relation_t> relation_list) noexcept -> bool
+            [&relation_count, &max_relation_count, &max_relation_tag_count, &max_relation_member_count, &relation_timestamp, &block_index, &relations_with_tags_count, &max_relation_id]
+            (input_osm::span_t<input_osm::relation_t> relation_list) noexcept -> bool
             {
                 auto cnt = relation_list.size();
                 relation_count[input_osm::thread_index] += cnt;
@@ -104,6 +125,11 @@ int main(int argc, char **argv)
                 for(auto &r: relation_list)
                     relation_timestamp[input_osm::thread_index] = std::max(relation_timestamp[input_osm::thread_index], r.timestamp);
                 block_index[input_osm::thread_index] = std::max(block_index[input_osm::thread_index], input_osm::block_index);
+                for(auto &r: relation_list)
+                    if(!r.tags.empty())
+                        relations_with_tags_count[input_osm::thread_index]++;
+                for(auto &r: relation_list)
+                    max_relation_id[input_osm::thread_index] = std::max(max_relation_id[input_osm::thread_index], r.id);
                 return true;
             }))
     {
@@ -139,5 +165,14 @@ int main(int argc, char **argv)
     std::cout << "max relation timestamp: " << timestamp_to_str(*std::max_element(relation_timestamp.begin(), relation_timestamp.end())) << std::endl;
 
     std::cout << "max file block index: " << *std::max_element(block_index.begin(), block_index.end()) << std::endl;
+
+    std::cout << "nodes with tags: " << std::accumulate(node_with_tags_count.begin(), node_with_tags_count.end(), 0LLU) << "\n";
+    std::cout << "ways with tags: " << std::accumulate(ways_with_tags_count.begin(), ways_with_tags_count.end(), 0LLU) << "\n";
+    std::cout << "relations with tags: " << std::accumulate(relations_with_tags_count.begin(), relations_with_tags_count.end(), 0LLU) << "\n";
+
+    std::cout << "max node id: " << *std::max_element(max_node_id.begin(), max_node_id.end()) << "\n";
+    std::cout << "max way id: " << *std::max_element(max_way_id.begin(), max_way_id.end()) << "\n";
+    std::cout << "max relation id: " << *std::max_element(max_relation_id.begin(), max_relation_id.end()) << "\n";
+
     return EXIT_SUCCESS;
 }

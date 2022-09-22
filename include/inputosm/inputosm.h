@@ -86,18 +86,20 @@ enum class mode_t
     destroy
 };
 
-extern mode_t osc_mode;
-
 bool input_file(const char* filename,
                 bool decode_metadata,
                 std::function<bool(span_t<node_t>)> node_handler,
                 std::function<bool(span_t<way_t>)> way_handler,
                 std::function<bool(span_t<relation_t>)> relation_handler) noexcept;
-extern thread_local size_t thread_index;
-extern thread_local size_t block_index;
+
 void set_thread_count(size_t);
 void set_max_thread_count();
 size_t thread_count();
+
+extern thread_local size_t thread_index;
+extern thread_local size_t block_index;
+extern mode_t osc_mode;
+extern file_type_t file_type;
 
 } // namespace
 
