@@ -1,6 +1,6 @@
 # README #
 
-Read OSM files.
+A high performace multi threaded and non-synchronized reader of OSM files (OSM, PBF, OSC).
 
 ### How do I get set up? ###
 
@@ -9,7 +9,7 @@ Read OSM files.
     Install:
     1) cmake > 3.5
     2) make (or another build system, like ninja)
-    3) c++17 compiler
+    3) c++20 compiler
 
 
 * Dependencies
