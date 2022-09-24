@@ -5,8 +5,9 @@ A high performace multi threaded and non-synchronized reader of OSM files (OSM, 
 ### How to test how fast it is? ###
 
 This is the result of running the statistics on a dual Xeon E5-2699, 72 cores total. I am curious what are the results on your system.
+Run:
 
-    Run:
+    ```sh
     $ time ./statistics /mnt/maps/planet-220905.osm.pbf 1
     /mnt/maps/planet-220905.osm.pbf
     reading metadata
@@ -50,7 +51,8 @@ This is the result of running the statistics on a dual Xeon E5-2699, 72 cores to
     real    0m28.215s
     user    30m23.402s
     sys     0m18.354s
-
+    ```
+    
 ### How do I get set up? ###
 
 * Summary of set up
@@ -69,6 +71,7 @@ This is the result of running the statistics on a dual Xeon E5-2699, 72 cores to
 * Configuration
 
     Run:
+    
     ```sh
     # linux
     cmake -S. -Bbuild && cmake --build build --target all --parallel $(nproc)
