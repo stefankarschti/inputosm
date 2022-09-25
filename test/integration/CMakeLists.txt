@@ -14,3 +14,6 @@ target_link_libraries(extract_ferries PRIVATE Threads::Threads inputosm::inputos
 
 add_executable(export_csv export_csv.cpp)
 target_link_libraries(export_csv PRIVATE Threads::Threads inputosm::inputosm)
+
+add_executable(lat_stat lat_stat.cpp)
+target_link_libraries(lat_stat PRIVATE Threads::Threads inputosm::inputosm)
