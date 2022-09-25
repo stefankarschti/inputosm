@@ -661,7 +661,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
                     switch(read_relation(field.pointer, field.pointer + field.length, relation_list, relation_tags, relation_members))
                     {
                         case result_t::eoutofmem:
-                            restart_ways = true;
+                            restart_relations = true;
                         case result_t::error:
                             return false;
                     }
@@ -671,6 +671,20 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
             }
             return true;
         });
+        if(restart_ways)
+        {
+            way_list.clear();
+            way_tags.clear();
+            way_node_refs.clear();
+            ways_read = 0;
+        }
+        if(restart_relations)
+        {
+            relation_list.clear();
+            relation_members.clear();
+            relation_tags.clear();
+            relations_read = 0;
+        }
         if(verbose && (restart_ways || restart_relations))
             printf("restarting read_primitive_group on thread %zu\n", thread_index);
     }

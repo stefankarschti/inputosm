@@ -17,3 +17,6 @@ target_link_libraries(export_csv PRIVATE Threads::Threads inputosm::inputosm)
 
 add_executable(lat_stat lat_stat.cpp)
 target_link_libraries(lat_stat PRIVATE Threads::Threads inputosm::inputosm)
+
+add_executable(export_db export_db.cpp)
+target_link_libraries(export_db PRIVATE Threads::Threads inputosm::inputosm)
