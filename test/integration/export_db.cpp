@@ -104,12 +104,12 @@ bool concatenate_and_remove_files(const char *root_filename, size_t file_count)
 
 int main(int argc, char **argv)
 {
-    // if (argc < 2)
-    // {
-    //     std::cerr << "Usage" << argv[0] << "<path-to-pbf> [read-metadata]\n";
-    //     return EXIT_FAILURE;
-    // }
-    const char* path = "/mnt/maps/berlin-220920.osm.pbf"; //argv[1];
+    if (argc < 2)
+    {
+        std::cerr << "Usage" << argv[0] << "<path-to-pbf> [read-metadata]\n";
+        return EXIT_FAILURE;
+    }
+    const char* path = argv[1];
     std::cout << "importing " << path << "\n";
     input_osm::set_max_thread_count();
 
