@@ -1,10 +1,10 @@
-# README #
+# Input OSM #
 
 A high performace multi threaded and non-synchronized reader of OSM files (OSM, PBF, OSC).
 
 ## How to test how fast it is? ##
 
-This is the result of running the statistics on a dual Xeon E5-2699, 72 cores total. I am curious what are the results on your system.
+This is the result of running the statistics on a dual `Xeon E5-2699`, 72 cores total. I am curious what the results are on your system.
 
 Run:
 
@@ -59,13 +59,23 @@ sys     0m18.354s
 * Summary of set up
 
     Install:
-    1) cmake > 3.5
-    2) make (or another build system, like ninja)
-    3) c++20 compiler
+    1) `cmake` > 3.16
+    2) `make` (or another build system, like `ninja`)
+    3) c++20 compiler (> `g++-9`, > `clang-12`, > `apple-clang-13`)
 
 * Dependencies
 
-    This library depends on EXPAT and ZLIB
+    This library depends on `EXPAT` and `ZLIB`
+
+    OR
+
+* Dependencies (with conan)
+
+    There's a `CMakeLists.txt` inside the `conan` folder which automatically handles dependencies. You need to have `conan` installed before you use that (make sure it's a recent 1.x version)
+
+    Example:
+
+        cmake -Sconan -Bbuild/gcc-11-Release -DCMAKE_BUILD_TYPE=Release
 
 * Configuration
 
@@ -73,9 +83,29 @@ sys     0m18.354s
 
     ```sh
     # linux
-    cmake -S. -Bbuild && cmake --build build --target all --parallel $(nproc)
+    cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release && cmake --build build --target all --parallel $(nproc)
     # mac
-    # cmake -S. -Bbuild && cmake --build build --target all --parallel $(sysctl -n hw.ncpu)
+    # cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release && cmake --build build --target all --parallel $(sysctl -n hw.ncpu)
+    # or both
+    # cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release && cmake --build build --target all --parallel $(getconf _NPROCESSORS_ONLN)
+    ```
+
+* Configuration (vscode)
+
+    An example `.vscode/settings.json` that allows you to directly configure using conan:
+
+    ```json
+    {
+        "files.associations": {
+            "*.cpp": "cpp",
+            "*.h" :"cpp"
+        },
+        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+        "cmake.configureOnOpen": false,
+        "cmake.buildDirectory" : "${workspaceFolder}/build/${buildKit}-${buildType}",
+        "cmake.installPrefix" : "${workspaceFolder}/install",
+        "cmake.sourceDirectory" : "${workspaceFolder}/conan"
+    }
     ```
 
 * How to run tests
@@ -101,7 +131,7 @@ sys     0m18.354s
 * Code reviews welcome
 * Write tests
 
-    Add tests in the tests folder.
+    *NOTE* Add tests in the tests folder.
 
 ## Who do I talk to? ##
 

@@ -1,0 +1,7 @@
+[requires]
+expat/2.4.9
+zlib/1.2.12
+
+[generators]
+cmake_paths
+cmake_find_package
