@@ -1,3 +1,7 @@
-.vscode
+# artifacts
 build
+install
+
+# ide
+.vscode
 *.user
