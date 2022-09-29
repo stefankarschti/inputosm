@@ -86,6 +86,8 @@ enum class mode_t
     destroy
 };
 
+void set_verbose(bool value);
+
 bool input_file(const char* filename,
                 bool decode_metadata,
                 std::function<bool(span_t<node_t>)> node_handler,
@@ -93,7 +95,9 @@ bool input_file(const char* filename,
                 std::function<bool(span_t<relation_t>)> relation_handler) noexcept;
 
 void set_thread_count(size_t);
+
 void set_max_thread_count();
+
 size_t thread_count();
 
 extern thread_local size_t thread_index;

@@ -40,7 +40,7 @@ extern std::function<bool(span_t<node_t>)> node_handler;
 extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
-static constexpr bool verbose = true;
+extern bool verbose;
 struct field_t
 {
     uint32_t key; // https://developers.google.com/protocol-buffers/docs/encoding#structure
@@ -85,7 +85,6 @@ thread_local int32_t granularity = 100;
 thread_local int64_t lat_offset = 0;
 thread_local int64_t lon_offset = 0;
 thread_local int32_t date_granularity = 1000;
-
 
 static constexpr uint32_t KEY(uint32_t field_number, uint8_t wire_type)
 {

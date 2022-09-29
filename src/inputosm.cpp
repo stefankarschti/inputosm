@@ -25,6 +25,7 @@ mode_t osc_mode;
 thread_local size_t thread_index{0};
 thread_local size_t block_index{0};
 file_type_t file_type{file_type_t::xml};
+bool verbose = true;
 
 bool input_pbf(const char* filename) noexcept;
 bool input_xml(const char* filename);
@@ -72,6 +73,11 @@ bool input_file(const char* filename,
         break;
     };
     return result;
+}
+
+void set_verbose(bool value)
+{
+    verbose = value;
 }
 
 } // namespace slim_osm
