@@ -12,6 +12,9 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
+
+#include "inputosmlog.h"
+
 #include <cstring>
 #include <filesystem>
 
@@ -47,7 +50,10 @@ bool input_file(const char* filename,
     bool result = false;
 
     if(!filename)
-	    return false;
+    {
+        IOSM_ERROR("Invalid file name: null");
+        return false;
+    }
 
     size_t len = strlen(filename);
     namespace fs = std::filesystem;
@@ -57,11 +63,14 @@ bool input_file(const char* filename,
     	input_osm::file_type = file_type_t::xml;
     }
     else if(0 == strcasecmp(extension, ".pbf"))
-    {	
-    	input_osm::file_type = file_type_t::pbf;
+    {
+        input_osm::file_type = file_type_t::pbf;
     }
     else
-	    return false;
+    {
+        IOSM_ERROR("Can't detect type from: %s", filename);
+        return false;
+    }
 
     switch(input_osm::file_type) 
     {

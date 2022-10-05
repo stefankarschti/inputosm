@@ -13,6 +13,8 @@
 
 #include <inputosm/inputosm.h>
 
+#include "inputosmlog.h"
+
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -1042,29 +1044,26 @@ bool input_pbf(const char* filename) noexcept
     struct stat mmapstat;
     if(stat(filename, &mmapstat) == -1)
     {
-        perror("stat");
+        IOSM_ERROR("Failed stat: %s", strerror(errno));
         return false;
     }
     int fd;
     if((fd = open(filename, O_RDONLY)) == -1)
     {
-        perror("open");
+        IOSM_ERROR("Failed open: %s", strerror(errno));
         return false;
     }
     uint8_t* file_data = (uint8_t*)mmap((caddr_t)0, mmapstat.st_size, PROT_READ, MAP_SHARED, fd, 0);
-    if((caddr_t)file_data == (caddr_t)(-1))
-    {
-        perror("mmap");
-    }
     close(fd);
     if((caddr_t)file_data == (caddr_t)(-1))
     {
+        IOSM_ERROR("Failed mmap: %s", strerror(errno));
         return false;
     }
     bool result = input_mem(file_data, mmapstat.st_size);
     if(munmap(file_data, mmapstat.st_size) == -1)
     {
-        perror("munmap");
+        IOSM_ERROR("Failed munmap: %s", strerror(errno));
         return false;
     }
     return result;
