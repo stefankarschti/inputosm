@@ -96,6 +96,34 @@ void set_thread_count(size_t);
 void set_max_thread_count();
 size_t thread_count();
 
+enum log_level_t : uint8_t
+{
+    LOG_LEVEL_TRACE = 0,
+    LOG_LEVEL_INFO = 4,
+    LOG_LEVEL_ERROR = 7,
+    LOG_LEVEL_DISABLED = 255,
+};
+
+/**
+ * @brief Set log level
+ * @note not thread safe
+ */
+void set_log_level(log_level_t) noexcept;
+
+/**
+ * @brief Log callback used for reporting back to the user
+ * @note the message is a \0 terminated c-string
+ */
+using log_callback_t = void(*)(log_level_t level, const char* message);
+
+/**
+ * @brief Set the log callback
+ * @param log_callback new log callback
+ * @note the log callback will be called from multiple threads, it should be thread safe
+ * @return true if set was OK
+ */
+bool set_log_callback(log_callback_t log_callback) noexcept;
+
 extern thread_local size_t thread_index;
 extern thread_local size_t block_index;
 extern mode_t osc_mode;

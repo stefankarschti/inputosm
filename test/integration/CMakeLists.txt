@@ -20,3 +20,6 @@ target_link_libraries(lat_stat PRIVATE Threads::Threads inputosm::inputosm)
 
 add_executable(export_db export_db.cpp)
 target_link_libraries(export_db PRIVATE Threads::Threads inputosm::inputosm)
+
+add_executable(custom_log custom_log.cpp)
+target_link_libraries(custom_log PRIVATE Threads::Threads inputosm::inputosm)
