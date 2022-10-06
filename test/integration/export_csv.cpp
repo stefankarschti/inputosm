@@ -24,6 +24,8 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <unordered_map>
+#include <thread>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -39,7 +41,7 @@ bool write_file(const char* filename, std::vector<std::string> &lines)
     {
         file_size += s.length();
     }
-    std::cout << "file size will be " << file_size << std::endl;
+    std::cout << "file size: " << file_size << " bytes\n";
     if(file_size > 0)
     {
         int fd;
@@ -66,15 +68,32 @@ bool write_file(const char* filename, std::vector<std::string> &lines)
         close(fd);
         if((caddr_t)file_data != (caddr_t)(-1))
         {
-            // write
-            size_t offset = 0;
-            int index = 0;
-            for(auto &s: lines)
+            // compute offsets
+            std::vector<size_t> offsets;
+            for(size_t offset{0}; auto &s: lines)
             {
-                std::cout << "\rpart " << ++index << "/" << input_osm::thread_count();
-                std::cout.flush();
-                memcpy(file_data + offset, s.data(), s.length());
+                offsets.push_back(offset);
                 offset += s.length();
+            }
+            // write threaded
+            auto work = [&lines, &offsets, file_data](int index){
+                auto &off = offsets[index];
+                memcpy(file_data + offsets[index], lines[index].data(), lines[index].length());
+                std::cout << ".";
+                std::cout.flush();
+            };
+            // spawn workers
+            size_t thread_count = offsets.size();
+            std::vector<std::thread> worker_threads(thread_count);
+            for(size_t index{0}; index < thread_count; index++)
+            {
+                worker_threads[index] = std::thread(work, index);
+            }
+            // wait for them to finish
+            for(auto& th: worker_threads)
+            {
+                if(th.joinable())
+                    th.join();
             }
             std::cout << "\n";
             // unmap
@@ -94,7 +113,7 @@ int main(int argc, char **argv)
         printf("Usage %s <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    const char* path = argv[1]; // "/mnt/maps/north-america-220728.osm.pbf";
+    const char* path = argv[1];
     input_osm::set_max_thread_count();
     printf("running on %zu threads\n", input_osm::thread_count());
     std::vector<std::string> lines(input_osm::thread_count());
@@ -104,25 +123,20 @@ int main(int argc, char **argv)
         int32_t lon = 0;
     };
     static_assert(sizeof(pos) == 8);
-    pos *node_pos = (pos*)calloc(10'000'000'000, sizeof(pos));
-    if(!node_pos)
-    {
-        std::cout << "Out of memory\n";
-        return EXIT_FAILURE;
-    }
+    std::vector<std::unordered_map<int64_t, pos>> node_pos_thread(input_osm::thread_count());
 
     // nodes
     std::cout << "extracting nodes...\n";
     if(!input_osm::input_file(
             path,
             true,
-            [&lines, &node_pos](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool
+            [&lines, &node_pos_thread](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool
             {
                 std::stringstream ss;
                 for(auto &n: node_list)
                 {
-                    node_pos[n.id].lat = n.raw_latitude;
-                    node_pos[n.id].lon = n.raw_longitude;
+                    node_pos_thread[input_osm::thread_index][n.id].lat = n.raw_latitude;
+                    node_pos_thread[input_osm::thread_index][n.id].lon = n.raw_longitude;
                     ss << n.id << ";0;0;" << n.timestamp << ";" << n.changeset << ";'";
                     for(auto itag = n.tags.begin(); itag != n.tags.end(); ++itag)
                     {
@@ -149,6 +163,13 @@ int main(int argc, char **argv)
         line.clear();
         line.shrink_to_fit();
     }
+    pos no_node{0, 0};
+    auto node_pos = [&node_pos_thread, &no_node](int64_t id)->pos& {
+        for(auto &npt: node_pos_thread)
+            if(auto it = npt.find(id); it != npt.end())
+                return it->second;
+        return no_node;
+    };
 
     // ways
     std::cout << "extracting ways and relations...\n";
@@ -186,7 +207,7 @@ int main(int argc, char **argv)
                     ss << "LINESTRING(";
                     for(auto inode = way.node_refs.begin(); inode != way.node_refs.end(); ++inode)
                     {
-                        auto &n = node_pos[*inode];
+                        auto &n = node_pos(*inode);
                         ss << std::fixed << std::setprecision(7) << n.lat / 10'000'000.0 << " " << n.lon / 10'000'000.0;
                         if(inode < way.node_refs.end() - 1)
                             ss << ",";
@@ -240,8 +261,6 @@ int main(int argc, char **argv)
     std::cout << "writing relation members csv...\n";
     write_file("relation_members.csv", lines_relation_members);
 
-    // release node position memory
-    free(node_pos);
     std::cout << "done.\n";
 
     return EXIT_SUCCESS;

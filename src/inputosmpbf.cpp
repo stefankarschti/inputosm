@@ -43,6 +43,7 @@ extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
 extern bool verbose;
+constexpr bool debug_verbose = false;
 struct field_t
 {
     uint32_t key; // https://developers.google.com/protocol-buffers/docs/encoding#structure
@@ -218,7 +219,7 @@ inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
         vec.emplace_back();
         if(vec.capacity() > previous_capacity)
         {
-            if(verbose)
+            if(debug_verbose)
                 printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
             return false;
         }
@@ -448,7 +449,7 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
                     node_refs.push_back(id);
                     if(node_refs.capacity() > previous_capacity)
                     {
-                        if(verbose)
+                        if(debug_verbose)
                             std::cout << "way node ref capacity exceeded: " << node_refs.capacity() << "/" << previous_capacity << " on thread " << thread_index << "\n";
                         result = result_t::eoutofmem;
                         return false;
@@ -686,7 +687,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
             relation_tags.clear();
             relations_read = 0;
         }
-        if(verbose && (restart_ways || restart_relations))
+        if(debug_verbose && (restart_ways || restart_relations))
             printf("restarting read_primitive_group on thread %zu\n", thread_index);
     }
     if(result)
@@ -723,12 +724,12 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
             break;
         case KEY(17,0): // granularity in nanodegrees
             granularity = (int64_t)field.value_uint64;
-            if(verbose)
+            if(debug_verbose)
                 std::cout << "granularity: " << granularity << " nanodegrees\n";
             break;
         case KEY(18,0): // date granularity in milliseconds
             date_granularity = (int64_t)field.value_uint64;
-            if(verbose)
+            if(debug_verbose)
                 std::cout << "date granularity: " << date_granularity << " milliseconds\n";
             break;
         case KEY(19,0): // latitude offset in nanodegrees
