@@ -12,6 +12,9 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
+#include "inputosmlog.h"
+#include "timeutil.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -20,7 +23,6 @@
 #include <string>
 #include <vector>
 #include <ctime>
-#include "timeutil.h"
 
 namespace input_osm {
 
@@ -299,9 +301,8 @@ bool input_xml(const char* filename)
         if(!XML_Parse(parser, xml_buff, len, done))
         {
             result = false;
-            printf("Error parsing xml!\n");
             xml_buff[len] = 0;
-            printf("Buffer: %s \n", xml_buff);
+            IOSM_ERROR("Error parsing xml! Buffer: %s\n", xml_buff);
             break;
         }
     }
