@@ -29,6 +29,9 @@ int main(int argc, char **argv)
     }
     const char* path = argv[1];
     
+    input_osm::set_max_thread_count();
+    printf("running on %zu threads\n", input_osm::thread_count());
+
     std::vector<uint64_t> ferry_count(input_osm::thread_count(), 0);    
     struct ferry_info
     {
