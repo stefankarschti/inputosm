@@ -782,7 +782,7 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                 {    
                     return false;
                 }
-                IOSM_TRACE("left: %9" PRId64 " right: %9" PRId64 " top: %9" PRId64 " bottom: %9" PRId64,
+                IOSM_TRACE("left: %.9f right: %.9f top: %.9f bottom: %.9f",
                     left / 1e9, right / 1e9, top / 1e9, bottom / 1e9
                 );
             }
@@ -805,7 +805,7 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
             break;
         case KEY(32,0): // osmosis_replication_timestamp
             osmosis_replication_timestamp = field.value_uint64;
-            IOSM_TRACE("osmosis_replication_timestamp: %" PRId64 "'%s'", osmosis_replication_timestamp, 
+            IOSM_TRACE("osmosis_replication_timestamp: %" PRId64 " '%s'", osmosis_replication_timestamp, 
                 timestamp_to_str(osmosis_replication_timestamp).c_str());
             break;
         case KEY(33,0): // osmosis_replication_sequence_number
@@ -986,7 +986,7 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
             if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block, index++))
                 return false;
         }
-        IOSM_TRACE("block work queue has  %" PRIu64 " items");
+        IOSM_TRACE("block work queue has  %" PRIu64 " items", work_queue.size());
     }
 
     // handle blobs
