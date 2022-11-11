@@ -14,8 +14,10 @@
 #include <inputosm/inputosm.h>
 
 #include "inputosmlog.h"
+#include "timeutil.h"
 
 #include <cstdint>
+#include <cinttypes>
 #include <cstring>
 #include <vector>
 #include <zlib.h>
@@ -219,8 +221,7 @@ inline bool check_capacity(std::vector<T> &vec, int index, const char* subject)
         vec.emplace_back();
         if(vec.capacity() > previous_capacity)
         {
-            if(debug_verbose)
-                printf("%s capacity exceeded: %zu/%zu on thread %zu\n", subject, vec.capacity(), previous_capacity, thread_index);
+            IOSM_TRACE("%s capacity exceeded: %zu/%zu on thread %zu", subject, vec.capacity(), previous_capacity, thread_index);
             return false;
         }
     }
@@ -449,8 +450,8 @@ result_t read_way(uint8_t* ptr, uint8_t* end, std::vector<way_t>& way_list, std:
                     node_refs.push_back(id);
                     if(node_refs.capacity() > previous_capacity)
                     {
-                        if(debug_verbose)
-                            std::cout << "way node ref capacity exceeded: " << node_refs.capacity() << "/" << previous_capacity << " on thread " << thread_index << "\n";
+                        IOSM_TRACE("way node ref capacity exceeded: %" PRIu64 "/ %" PRIu64 " on thread %" PRIu64,
+                            node_refs.capacity(), previous_capacity, thread_index);
                         result = result_t::eoutofmem;
                         return false;
                     }
@@ -687,8 +688,10 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
             relation_tags.clear();
             relations_read = 0;
         }
-        if(debug_verbose && (restart_ways || restart_relations))
-            printf("restarting read_primitive_group on thread %zu\n", thread_index);
+        if(restart_ways || restart_relations)
+        {
+            IOSM_TRACE("restarting read_primitive_group on thread %zu", thread_index);
+        }
     }
     if(result)
     {
@@ -724,23 +727,19 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
             break;
         case KEY(17,0): // granularity in nanodegrees
             granularity = (int64_t)field.value_uint64;
-            if(debug_verbose)
-                std::cout << "granularity: " << granularity << " nanodegrees\n";
+            IOSM_TRACE("granularity: %" PRId32 " nanodegrees", granularity);
             break;
         case KEY(18,0): // date granularity in milliseconds
             date_granularity = (int64_t)field.value_uint64;
-            if(debug_verbose)
-                std::cout << "date granularity: " << date_granularity << " milliseconds\n";
+            IOSM_TRACE("date granularity: %" PRId32 " milliseconds", date_granularity);
             break;
         case KEY(19,0): // latitude offset in nanodegrees
             lat_offset = (int64_t)field.value_uint64;
-            if(verbose)
-                std::cout << "latitude offset: " << lat_offset << " nanodegrees\n";
+            IOSM_TRACE("latitude offset: %" PRId32 " nanodegrees", lat_offset);
             break;
         case KEY(20,0): // longitude offset in nanodegrees
             lon_offset = (int64_t)field.value_uint64;
-            if(verbose)
-                std::cout << "longitude offset: " << lon_offset << " nanodegrees\n";
+            IOSM_TRACE("longitude offset: %" PRId32 " nanodegrees", lon_offset);
             break;
         }
         return true;
@@ -780,50 +779,43 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                     }
                     return true;
                 }))
+                {    
                     return false;
-                if(verbose)
-                {
-                    std::cout << "left: " << std::fixed << std::setprecision(9) << left / 1e9 << "\n";
-                    std::cout << "right: " << std::fixed << std::setprecision(9) << right / 1e9 << "\n";
-                    std::cout << "top: " << std::fixed << std::setprecision(9) << top / 1e9 << "\n";
-                    std::cout << "bottom: " << std::fixed << std::setprecision(9) << bottom / 1e9 << "\n";
                 }
+                IOSM_TRACE("left: %9" PRId64 " right: %9" PRId64 " top: %9" PRId64 " bottom: %9" PRId64,
+                    left / 1e9, right / 1e9, top / 1e9, bottom / 1e9
+                );
             }
             break;
         case KEY(4,2): // required features
             required_features.emplace_back(std::string((const char*)field.pointer, field.length));
-            if(verbose)
-                std::cout << "required feature: " << required_features.back() << "\n";
+            IOSM_TRACE("required feature: %s", required_features.back().c_str());
             break;
         case KEY(5,2): // optional features
             optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
-            if(verbose)
-                std::cout << "optional feature: " << optional_features.back() << "\n";
+            IOSM_TRACE("optional feature: %s", optional_features.back().c_str());
             break;
         case KEY(16,2): // writing program
             writing_program = std::string((const char*)field.pointer, field.length);
-            if(verbose)
-                std::cout << "writing_program: " << writing_program << "\n";
+            IOSM_TRACE("writing_program: %s", writing_program.c_str());
             break;
         case KEY(17,2): // source
             source = std::string((const char*)field.pointer, field.length);
-            if(verbose)
-                std::cout << "source: " << source << "\n";
+            IOSM_TRACE("source: %s", source.c_str());
             break;
         case KEY(32,0): // osmosis_replication_timestamp
             osmosis_replication_timestamp = field.value_uint64;
-            if(verbose)
-                std::cout << "osmosis_replication_timestamp: " << osmosis_replication_timestamp << " \"" << std::put_time(std::gmtime(&osmosis_replication_timestamp), "%Y-%m-%d %X %Z") << "\"\n";
+            IOSM_TRACE("osmosis_replication_timestamp: %" PRId64 "'%s'", osmosis_replication_timestamp, 
+                timestamp_to_str(osmosis_replication_timestamp).c_str());
             break;
         case KEY(33,0): // osmosis_replication_sequence_number
             osmosis_sequence_number = field.value_uint64;
-            if(verbose)
-                std::cout << "osmosis_sequence_number: " << osmosis_sequence_number << "\n";
+            IOSM_TRACE("osmosis_sequence_number: %" PRId64 "", osmosis_sequence_number, 
+                timestamp_to_str(osmosis_replication_timestamp).c_str());
             break;
         case KEY(34,0): // osmosis_replication_base_url
             osmosis_replication_base_url = std::string((const char*)field.pointer, field.length);
-            if(verbose)
-                std::cout << "osmosis_replication_base_url: " << osmosis_replication_base_url << "\n";
+            IOSM_TRACE("osmosis_replication_base_url: %s", osmosis_replication_base_url.c_str());
             break;
         }
         return true;
@@ -971,18 +963,9 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
         size_t index = 0;
         std::locale old_locale;
 
-        if(verbose)
-        {
-            old_locale = std::cout.imbue(std::locale(""));
-            std::cout << "file size is " << file_size << " bytes\n";
-        }
+        IOSM_TRACE("file size is %" PRIu64 " bytes", file_size);
+        IOSM_TRACE("reading block %" PRIu64, index);
 
-        // header blob
-        if(verbose)
-        {
-            std::cout << "\rreading block " << index;
-            std::flush(std::cout);
-        }
         if(buf + 4 > file_end)
             return false;
         uint32_t header_size = read_net_uint32(buf);
@@ -993,11 +976,7 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
         // data blobs
         while(buf < file_end)
         {
-            if(verbose)
-            {
-                std::cout << "\rreading block " << index << " offset " << buf - file_begin;
-                std::flush(std::cout);
-            }
+            IOSM_TRACE("reading block %" PRIu64 " offset %" PRId64, index, buf - file_begin);
             // header size
             if(buf + 4 > file_end)
                 break;
@@ -1007,11 +986,7 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
             if(!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block, index++))
                 return false;
         }
-        if(verbose)
-        {
-            std::cout << "\nblock work queue has " << work_queue.size() << " items\n";
-            std::cout.imbue(old_locale);
-        }
+        IOSM_TRACE("block work queue has  %" PRIu64 " items");
     }
 
     // handle blobs
