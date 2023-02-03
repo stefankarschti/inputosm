@@ -11,12 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "counter.h"
+
 #include <inputosm/inputosm.h>
 
 #include <iostream>
 #include <cstdint>
 #include <numeric>
 #include <vector>
+#include <span>
 
 int main(int argc, char **argv)
 {
@@ -31,19 +34,26 @@ int main(int argc, char **argv)
     if(read_metadata)
         std::cout << "reading metadata\n";
     input_osm::set_max_thread_count();
-    std::cout << "running on " << input_osm::thread_count() << " threads\n";
 
-    std::vector<uint64_t> node_count(input_osm::thread_count(), 0);
-    std::vector<uint64_t> way_count(input_osm::thread_count(), 0);
-    std::vector<uint64_t> relation_count(input_osm::thread_count(), 0);
+    const size_t actual_thread_count = input_osm::thread_count();
+
+    std::cout << "running on " << actual_thread_count << " threads\n";
+
+    // do a single allocation
+    std::vector<input_osm::Counter<uint64_t>> all_counters(3 * actual_thread_count);
+
+    // use spans to split counters for each entity
+    std::span<input_osm::Counter<uint64_t>> node_count(all_counters.data(), actual_thread_count);
+    std::span<input_osm::Counter<uint64_t>> way_count(all_counters.data() + actual_thread_count, actual_thread_count);
+    std::span<input_osm::Counter<uint64_t>> relation_count(all_counters.data() + 2 * actual_thread_count, actual_thread_count);
 
     if (!input_osm::input_file(
             path,
             read_metadata,
             [&node_count](input_osm::span_t<input_osm::node_t> node_list) -> bool
-            { 
+            {
                 node_count[input_osm::thread_index] += node_list.size();
-                return true; 
+                return true;
             },
             [&way_count](input_osm::span_t<input_osm::way_t> way_list) -> bool
             {
