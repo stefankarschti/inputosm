@@ -4,7 +4,7 @@ A high performace multi threaded and non-synchronized reader of OSM files (OSM, 
 
 ## How to test the import speed? ##
 
-This is the result of running the statistics on a dual `Xeon E5-2699`, 72 cores total. I am curious what the results are on your system.
+This is the result of running the statistics on a dual `Xeon E5-2699`, 72 cores total.
 
 Run:
 
@@ -133,6 +133,3 @@ sys     0m18.354s
 
     *NOTE* Add tests in the tests folder.
 
-## Who do I talk to? ##
-
-* Stefan Karschti
