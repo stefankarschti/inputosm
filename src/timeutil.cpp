@@ -13,6 +13,7 @@
 
 #include "timeutil.h"
 #include <chrono>
+#include <inttypes.h>
 
 int64_t now_ms()
 {
@@ -52,7 +53,7 @@ std::string duration_to_str(int64_t nano)
     char buffer[256];
     if (nano < 1000l)
     {
-        snprintf(buffer, 256, "%ld ns", nano);
+        snprintf(buffer, 256, "%" PRId64 " ns", nano);
     }
     else if (nano < 1000000l)
     {
@@ -75,9 +76,9 @@ std::string duration_to_str(int64_t nano)
         minutes = minutes % 60;
 
         if (hours > 0)
-            snprintf(buffer, 256, "%lu hours %lu minutes %lu seconds", hours, minutes, seconds);
+            snprintf(buffer, 256, "%" PRId64 " hours %" PRId64 " minutes %" PRId64 " seconds", hours, minutes, seconds);
         else
-            snprintf(buffer, 256, "%lu minutes %lu seconds", minutes, seconds);
+            snprintf(buffer, 256, "%" PRId64 " minutes %" PRId64 " seconds", minutes, seconds);
     }
     return std::string(buffer);
 }
