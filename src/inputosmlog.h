@@ -18,7 +18,8 @@
 
 #define INPUT_OSM_LOG_ENABLED 1
 
-namespace input_osm {
+namespace input_osm
+{
 
 extern log_level_t g_log_level;
 extern log_callback_t g_log_callback;
@@ -34,9 +35,9 @@ void log(log_level_t level, const char* fmt, ...) noexcept;
 } // namespace input_osm
 
 #ifdef INPUT_OSM_LOG_ENABLED
-#define IOSM_TRACE(fmt, ...) log(input_osm::LOG_LEVEL_TRACE, fmt __VA_OPT__(,) __VA_ARGS__)
-#define IOSM_INFO(fmt, ...) log(input_osm::LOG_LEVEL_INFO, fmt __VA_OPT__(,) __VA_ARGS__)
-#define IOSM_ERROR(fmt, ...) log(input_osm::LOG_LEVEL_ERROR, fmt __VA_OPT__(,) __VA_ARGS__)
+#define IOSM_TRACE(fmt, ...) log(input_osm::LOG_LEVEL_TRACE, fmt __VA_OPT__(, ) __VA_ARGS__)
+#define IOSM_INFO(fmt, ...) log(input_osm::LOG_LEVEL_INFO, fmt __VA_OPT__(, ) __VA_ARGS__)
+#define IOSM_ERROR(fmt, ...) log(input_osm::LOG_LEVEL_ERROR, fmt __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define IOSM_TRACE(fmt, ...)
 #define IOSM_INFO(fmt, ...)

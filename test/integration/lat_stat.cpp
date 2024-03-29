@@ -28,7 +28,7 @@ int main(int argc, char **argv)
         std::cerr << "Usage" << argv[0] << "<path-to-pbf>\n";
         return EXIT_FAILURE;
     }
-    const char* path = argv[1];
+    const char *path = argv[1];
     std::cout << path << "\n";
     bool read_metadata = false;
     input_osm::set_max_thread_count();
@@ -41,9 +41,9 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             read_metadata,
-            [&node_count_by_lat, actual_thread_count = input_osm::thread_count()](input_osm::span_t<input_osm::node_t> node_list) -> bool
-            {
-                for(auto &n: node_list)
+            [&node_count_by_lat,
+             actual_thread_count = input_osm::thread_count()](input_osm::span_t<input_osm::node_t> node_list) -> bool {
+                for (auto &n : node_list)
                 {
                     ++node_count_by_lat[input_osm::thread_index * actual_thread_count + std::abs(n.raw_latitude / 1e7)];
                 }
@@ -60,9 +60,9 @@ int main(int argc, char **argv)
     std::vector<int64_t> lats(total_lat_degree_values, 0);
     int64_t sum = 0;
 
-    for(int ti = 0; ti < input_osm::thread_count(); ++ti)
+    for (int ti = 0; ti < input_osm::thread_count(); ++ti)
     {
-        for(int degree = 0; degree < total_lat_degree_values; ++degree)
+        for (int degree = 0; degree < total_lat_degree_values; ++degree)
         {
             lats[degree] += node_count_by_lat[ti * total_lat_degree_values + degree];
             sum += node_count_by_lat[ti * total_lat_degree_values + degree];
@@ -74,9 +74,10 @@ int main(int argc, char **argv)
     std::cout << "| -------- | ------------- | ---------- |\n";
     std::cout << std::fixed << std::setprecision(2);
 
-    for(size_t i = 0; i < total_lat_degree_values; ++i)
+    for (size_t i = 0; i < total_lat_degree_values; ++i)
     {
-        std::cout << "| " << std::setw(8) << i << " | " << std::setw(13) << lats[i] << " | " << std::setw(9) << (lats[i] * 100.0 / sum) << "% |\n";
+        std::cout << "| " << std::setw(8) << i << " | " << std::setw(13) << lats[i] << " | " << std::setw(9)
+                  << (lats[i] * 100.0 / sum) << "% |\n";
     }
 
     std::cout << "|   total  | " << std::setw(13) << sum << " |    100.00% |\n";

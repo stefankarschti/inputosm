@@ -1,0 +1,30 @@
+---
+BasedOnStyle: Google
+AccessModifierOffset: -4
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: Inline
+BinPackArguments: false
+BinPackParameters: false
+ColumnLimit: 120
+IncludeBlocks: Preserve
+IndentWidth: 4
+Language: Cpp
+PackConstructorInitializers: Never
+PenaltyBreakAssignment: 80
+SortIncludes: false
+SpacesBeforeTrailingComments: 1
+Standard: c++20
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass:      true
+  AfterControlStatement: true
+  AfterEnum:       true
+  AfterFunction:   true
+  AfterNamespace:  true
+  AfterStruct:     true
+  AfterUnion:      true
+  AfterExternBlock: true
+  BeforeCatch:     true
+  BeforeElse:      true
+  IndentBraces:    false

@@ -21,7 +21,7 @@
 #include <vector>
 #include <span>
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
     if (argc < 2)
     {
@@ -31,8 +31,7 @@ int main(int argc, char **argv)
     const char* path = argv[1];
     std::cout << path << "\n";
     bool read_metadata = (argc >= 3);
-    if(read_metadata)
-        std::cout << "reading metadata\n";
+    if (read_metadata) std::cout << "reading metadata\n";
     input_osm::set_max_thread_count();
 
     const size_t actual_thread_count = input_osm::thread_count();
@@ -45,23 +44,21 @@ int main(int argc, char **argv)
     // use spans to split counters for each entity
     std::span<input_osm::Counter<uint64_t>> node_count(all_counters.data(), actual_thread_count);
     std::span<input_osm::Counter<uint64_t>> way_count(all_counters.data() + actual_thread_count, actual_thread_count);
-    std::span<input_osm::Counter<uint64_t>> relation_count(all_counters.data() + 2 * actual_thread_count, actual_thread_count);
+    std::span<input_osm::Counter<uint64_t>> relation_count(all_counters.data() + 2 * actual_thread_count,
+                                                           actual_thread_count);
 
     if (!input_osm::input_file(
             path,
             read_metadata,
-            [&node_count](input_osm::span_t<input_osm::node_t> node_list) -> bool
-            {
+            [&node_count](input_osm::span_t<input_osm::node_t> node_list) -> bool {
                 node_count[input_osm::thread_index] += node_list.size();
                 return true;
             },
-            [&way_count](input_osm::span_t<input_osm::way_t> way_list) -> bool
-            {
+            [&way_count](input_osm::span_t<input_osm::way_t> way_list) -> bool {
                 way_count[input_osm::thread_index] += way_list.size();
                 return true;
             },
-            [&relation_count](input_osm::span_t<input_osm::relation_t> relation_list) -> bool
-            {
+            [&relation_count](input_osm::span_t<input_osm::relation_t> relation_list) -> bool {
                 relation_count[input_osm::thread_index] += relation_list.size();
                 return true;
             }))

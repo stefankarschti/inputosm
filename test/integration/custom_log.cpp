@@ -12,11 +12,9 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    const auto logWithTime = [](input_osm::log_level_t level, const char *message)
-    {
-        auto lvl_to_str = [](input_osm::log_level_t lvl)
-        {
-            switch(lvl)
+    const auto logWithTime = [](input_osm::log_level_t level, const char *message) {
+        auto lvl_to_str = [](input_osm::log_level_t lvl) {
+            switch (lvl)
             {
                 case input_osm::LOG_LEVEL_TRACE:
                     return "TRC";
@@ -43,12 +41,11 @@ int main(int argc, char **argv)
 
     using input_osm::span_t;
     if (!input_osm::input_file(
-            argv[1], true, [](span_t<input_osm::node_t> node_list)
-            { return true; },
-            [](span_t<input_osm::way_t>)
-            { return true; },
-            [](span_t<input_osm::relation_t>)
-            { return true; }))
+            argv[1],
+            true,
+            [](span_t<input_osm::node_t> node_list) { return true; },
+            [](span_t<input_osm::way_t>) { return true; },
+            [](span_t<input_osm::relation_t>) { return true; }))
     {
         return EXIT_FAILURE;
     }

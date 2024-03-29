@@ -15,24 +15,20 @@ struct Counter
 
     Counter() = default;
 
-    Counter(T c): count(c) {}
+    Counter(T c)
+        : count(c)
+    {
+    }
 
     // to simplify using the algorithms with this type
-    operator const T&() const
-    {
-        return count;
-    }
+    operator const T&() const { return count; }
 
-    operator T&()
-    {
-        return count;
-    }
+    operator T&() { return count; }
 
 private:
     // one cacheline worth, actual counter
     alignas(64) T count = 0;
 };
-
 
 using u64_64B = Counter<uint64_t>;
 using i64_64B = Counter<int64_t>;
