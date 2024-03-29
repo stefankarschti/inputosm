@@ -52,19 +52,19 @@ std::string duration_to_str(int64_t nano)
     char buffer[256];
     if (nano < 1000l)
     {
-        sprintf(buffer, "%ld ns", nano);
+        snprintf(buffer, 256, "%ld ns", nano);
     }
     else if (nano < 1000000l)
     {
-        sprintf(buffer, "%.3f μs", nano / 1000.0);
+        snprintf(buffer, 256, "%.3f μs", nano / 1000.0);
     }
     else if (nano < 1000000000l) // < 1s
     {
-        sprintf(buffer, "%.3f ms", nano / 1000000.0);
+        snprintf(buffer, 256, "%.3f ms", nano / 1000000.0);
     }
     else if (nano < 60000000000l) // < 60s
     {
-        sprintf(buffer, "%.3f s", nano / 1000000000.0);
+        snprintf(buffer, 256, "%.3f s", nano / 1000000000.0);
     }
     else
     {
@@ -75,9 +75,9 @@ std::string duration_to_str(int64_t nano)
         minutes = minutes % 60;
 
         if (hours > 0)
-            sprintf(buffer, "%lu hours %lu minutes %lu seconds", hours, minutes, seconds);
+            snprintf(buffer, 256, "%lu hours %lu minutes %lu seconds", hours, minutes, seconds);
         else
-            sprintf(buffer, "%lu minutes %lu seconds", minutes, seconds);
+            snprintf(buffer, 256, "%lu minutes %lu seconds", minutes, seconds);
     }
     return std::string(buffer);
 }
