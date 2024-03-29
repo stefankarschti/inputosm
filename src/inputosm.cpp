@@ -18,7 +18,8 @@
 #include <cstring>
 #include <filesystem>
 
-namespace input_osm {
+namespace input_osm
+{
 
 bool decode_metadata;
 std::function<bool(span_t<node_t>)> node_handler;
@@ -49,7 +50,7 @@ bool input_file(const char* filename,
     input_osm::block_index = 0;
     bool result = false;
 
-    if(!filename)
+    if (!filename)
     {
         IOSM_ERROR("Invalid file name: null");
         return false;
@@ -58,11 +59,11 @@ bool input_file(const char* filename,
     size_t len = strlen(filename);
     namespace fs = std::filesystem;
     const char* extension = fs::path(filename).extension().c_str();
-    if(0 == strcasecmp(extension, ".osm") or 0 == strcasecmp(extension, ".osc"))
+    if (0 == strcasecmp(extension, ".osm") or 0 == strcasecmp(extension, ".osc"))
     {
-    	input_osm::file_type = file_type_t::xml;
+        input_osm::file_type = file_type_t::xml;
     }
-    else if(0 == strcasecmp(extension, ".pbf"))
+    else if (0 == strcasecmp(extension, ".pbf"))
     {
         input_osm::file_type = file_type_t::pbf;
     }
@@ -72,14 +73,14 @@ bool input_file(const char* filename,
         return false;
     }
 
-    switch(input_osm::file_type) 
+    switch (input_osm::file_type)
     {
         case file_type_t::pbf:
             result = input_pbf(filename);
-        break;
+            break;
         case file_type_t::xml:
             result = input_xml(filename);
-        break;
+            break;
     };
     return result;
 }
@@ -89,4 +90,4 @@ void set_verbose(bool value)
     verbose = value;
 }
 
-} // namespace slim_osm
+} // namespace input_osm
