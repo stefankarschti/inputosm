@@ -43,7 +43,7 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             argv[1],
             true,
-            [](span_t<input_osm::node_t> node_list) { return true; },
+            [](span_t<input_osm::node_t>) { return true; },
             [](span_t<input_osm::way_t>) { return true; },
             [](span_t<input_osm::relation_t>) { return true; }))
     {

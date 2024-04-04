@@ -36,7 +36,7 @@
 
 bool write_file(const char *filename, std::vector<std::string> &lines)
 {
-    size_t file_size = 0;
+    int64_t file_size = 0;
     for (const auto &s : lines)
     {
         file_size += s.length();
@@ -77,7 +77,6 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
             }
             // write threaded
             auto work = [&lines, &offsets, file_data](int index) {
-                auto &off = offsets[index];
                 memcpy(file_data + offsets[index], lines[index].data(), lines[index].length());
                 std::cout << ".";
                 std::cout.flush();

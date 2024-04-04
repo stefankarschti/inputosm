@@ -79,7 +79,7 @@ bool concatenate_and_remove_files(const char *root_filename, size_t file_count)
         return false;
     }
     bool result = true;
-    for(int i = 0; i < file_count; ++i)
+    for(size_t i = 0; i < file_count; ++i)
     {
         std::string filename{root_filename + std::to_string(i)};
         caddr_t file_data{nullptr};
@@ -117,7 +117,7 @@ int main(int argc, char **argv)
     std::vector<int> node_files(input_osm::thread_count(), -1);
     std::vector<int> way_files(input_osm::thread_count(), -1);
     std::vector<int> relation_files(input_osm::thread_count(), -1);
-    for(int i = 0; i < input_osm::thread_count(); ++i)
+    for(size_t i = 0; i < input_osm::thread_count(); ++i)
     {
         using namespace std::string_literals;
         node_files[i] = ::open(("node"s + std::to_string(i)).c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0644);

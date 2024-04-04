@@ -8,6 +8,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Toggle integration tests
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
+option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
+
+if(WARNINGS_AS_ERRORS)
+    if(MSVC)
+        add_compile_options(/W4 /WX)
+    else()
+        add_compile_options(-Wall -Wextra -Werror)
+    endif()
+endif()
 
 # Inputosm deps
 find_package(EXPAT REQUIRED)

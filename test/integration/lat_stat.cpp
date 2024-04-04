@@ -60,9 +60,9 @@ int main(int argc, char **argv)
     std::vector<int64_t> lats(total_lat_degree_values, 0);
     int64_t sum = 0;
 
-    for (int ti = 0; ti < input_osm::thread_count(); ++ti)
+    for (size_t ti = 0; ti < input_osm::thread_count(); ++ti)
     {
-        for (int degree = 0; degree < total_lat_degree_values; ++degree)
+        for (unsigned int degree = 0; degree < total_lat_degree_values; ++degree)
         {
             lats[degree] += node_count_by_lat[ti * total_lat_degree_values + degree];
             sum += node_count_by_lat[ti * total_lat_degree_values + degree];
