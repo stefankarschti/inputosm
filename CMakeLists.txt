@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Toggle integration tests
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
+option(ENABLE_CLANG_TIDY "Enable clang-tidy checks" OFF)
 
 if(WARNINGS_AS_ERRORS)
     if(MSVC)
@@ -16,6 +17,16 @@ if(WARNINGS_AS_ERRORS)
     else()
         add_compile_options(-Wall -Wextra -Werror)
     endif()
+endif()
+
+if (ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_COMMAND NAMES clang-tidy)
+    if(NOT CLANG_TIDY_COMMAND)
+        message(FATAL_ERROR "ENABLE_CLANG_TIDY is ON but clang-tidy is not found!")
+    else()
+        message(STATUS "Found clang-tidy at ${CLANG_TIDY_COMMAND}")
+    endif()
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND};--extra-arg=-Wno-unknown-warning-option;--extra-arg=-Wno-pragmas")
 endif()
 
 # Inputosm deps
