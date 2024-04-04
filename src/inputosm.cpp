@@ -58,12 +58,12 @@ bool input_file(const char* filename,
 
     size_t len = strlen(filename);
     namespace fs = std::filesystem;
-    const char* extension = fs::path(filename).extension().c_str();
-    if (0 == strcasecmp(extension, ".osm") or 0 == strcasecmp(extension, ".osc"))
+    const std::string extension = fs::path(filename).extension().string();
+    if (extension == ".osm" || extension == ".osc")
     {
         input_osm::file_type = file_type_t::xml;
     }
-    else if (0 == strcasecmp(extension, ".pbf"))
+    else if (extension == ".pbf")
     {
         input_osm::file_type = file_type_t::pbf;
     }
