@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <thread>
 
+#define _FILE_OFFSET_BITS 64
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
@@ -50,7 +51,7 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
             perror("create");
             return false;
         }
-        if (file_size - 1 == lseek64(fd, file_size - 1, SEEK_SET))
+        if (file_size - 1 == lseek(fd, file_size - 1, SEEK_SET))
         {
             write(fd, &file_size, 1);
         }
