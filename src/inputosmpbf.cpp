@@ -46,7 +46,6 @@ extern std::function<bool(span_t<way_t>)> way_handler;
 extern std::function<bool(span_t<relation_t>)> relation_handler;
 
 extern bool verbose;
-constexpr bool debug_verbose = false;
 struct field_t
 {
     uint32_t key; // https://developers.google.com/protocol-buffers/docs/encoding#structure
@@ -205,7 +204,7 @@ inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
 }
 
 template <typename T>
-inline bool check_capacity(std::vector<T>& vec, int index, const char* subject)
+inline bool check_capacity(std::vector<T>& vec, std::size_t index, const char* subject)
 {
     size_t previous_capacity = vec.capacity();
     while (index >= vec.size())

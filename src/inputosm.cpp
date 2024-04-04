@@ -56,14 +56,22 @@ bool input_file(const char* filename,
         return false;
     }
 
-    size_t len = strlen(filename);
-    namespace fs = std::filesystem;
-    const char* extension = fs::path(filename).extension().c_str();
-    if (0 == strcasecmp(extension, ".osm") or 0 == strcasecmp(extension, ".osc"))
+    std::string_view filename_sv = filename; // does the strlen
+    size_t pos_of_period = filename_sv.find_last_of('.');
+    std::string_view extension;
+    if (pos_of_period != std::string_view::npos)
+    {
+        extension = filename_sv.substr(pos_of_period);
+    }
+    constexpr std::string_view k_osm = ".osm";
+    constexpr std::string_view k_osc = ".osc";
+    constexpr std::string_view k_pbf = ".pbf";
+
+    if (extension.compare(k_osm) == 0|| extension.compare(k_osc) == 0)
     {
         input_osm::file_type = file_type_t::xml;
     }
-    else if (0 == strcasecmp(extension, ".pbf"))
+    else if (extension.compare(k_pbf) == 0)
     {
         input_osm::file_type = file_type_t::pbf;
     }

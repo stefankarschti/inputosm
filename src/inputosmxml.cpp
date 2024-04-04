@@ -191,10 +191,9 @@ static void xml_start_member(const char **attr)
     }
 }
 
-static void xml_start_tag(void *data, const char *el, const char **attr)
+static void xml_start_tag(void */*data*/, const char *el, const char **attr)
 {
     // XML tag start
-    struct xml_params *params = (struct xml_params *)data;
     if (strcmp(el, "node") == 0) xml_start_node(attr);
     if (strcmp(el, "way") == 0) xml_start_way(attr);
     if (strcmp(el, "relation") == 0) xml_start_relation(attr);
@@ -208,7 +207,7 @@ static void xml_start_tag(void *data, const char *el, const char **attr)
     if (strcmp(el, "delete") == 0) osc_mode = mode_t::destroy;
 }
 
-static void xml_end_tag(void *data, const char *el)
+static void xml_end_tag(void */*data*/, const char *el)
 {
     // XML tag end
     if (strcmp(el, "node") == 0) xml_end_node();
