@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Toggle integration tests
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
-option(ENABLE_CLANG_TIDY "Enable clang-tidy checks" OFF)
+option(ENABLE_CLANG_TIDY "Enable clang-tidy checks" ON)
 
 if(WARNINGS_AS_ERRORS)
     if(MSVC)
