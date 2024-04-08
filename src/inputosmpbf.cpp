@@ -48,10 +48,10 @@ extern std::function<bool(span_t<relation_t>)> relation_handler;
 extern bool verbose;
 struct field_t
 {
-    uint32_t key; // https://developers.google.com/protocol-buffers/docs/encoding#structure
-    uint8_t* pointer;
-    uint64_t length;
-    uint64_t value_uint64;
+    uint32_t key {0}; // https://developers.google.com/protocol-buffers/docs/encoding#structure
+    uint8_t* pointer {nullptr};
+    uint64_t length {0};
+    uint64_t value_uint64 {0};
 };
 
 struct string_table_t
