@@ -56,7 +56,7 @@ struct field_t
 
 struct string_table_t
 {
-    std::vector<uint32_t> st_index;
+    std::vector<std::size_t> st_index;
     std::vector<uint8_t> st_buffer;
 
     void clear()
