@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 constexpr const char* kError = "err";
 constexpr const char* kInfo = "inf";
