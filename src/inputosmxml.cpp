@@ -15,6 +15,7 @@
 #include "inputosmlog.h"
 #include "timeutil.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -86,7 +87,7 @@ static void xml_end_node()
     current_tag = current_tag_t::none;
     // assemble tags
     std::vector<tag_t> tags;
-    for (auto i = 0; i < current_tags.size(); i++)
+    for (std::size_t i = 0; i < current_tags.size(); i++)
     {
         tags.emplace_back(
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
@@ -117,7 +118,7 @@ static void xml_end_way()
     current_tag = current_tag_t::none;
     // assemble tags
     std::vector<tag_t> tags;
-    for (auto i = 0; i < current_tags.size(); i++)
+    for (std::size_t i = 0; i < current_tags.size(); i++)
     {
         tags.emplace_back(
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
@@ -150,7 +151,7 @@ static void xml_end_relation()
     current_tag = current_tag_t::none;
     // assemble tags
     std::vector<tag_t> tags;
-    for (auto i = 0; i < current_tags.size(); i++)
+    for (std::size_t i = 0; i < current_tags.size(); i++)
     {
         tags.emplace_back(
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
