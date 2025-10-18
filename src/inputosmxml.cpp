@@ -211,7 +211,7 @@ static void xml_start_member(const char **attr)
             if (strcmp(attr[i], "type") == 0)
             {
                 if (strcmp(attr[i + 1], "node") == 0) member.type = 0;
-                if (strcmp(attr[i + 1], "way") == 0) member.type = 2;
+                if (strcmp(attr[i + 1], "way") == 0) member.type = 1;
                 if (strcmp(attr[i + 1], "relation") == 0) member.type = 2;
             }
             if (strcmp(attr[i], "role") == 0)
