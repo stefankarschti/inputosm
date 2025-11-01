@@ -13,7 +13,8 @@
 
 #include "timeutil.h"
 #include <chrono>
-#include <inttypes.h>
+#include <ctime>
+#include <cinttypes>
 
 int64_t now_ms()
 {
@@ -29,16 +30,24 @@ int64_t now_us()
 
 time_t str_to_timestamp(const char* str)
 {
-    struct tm timeinfo;
-    strptime(str, "%FT%TZ", &timeinfo);
-    return mktime(&timeinfo);
+    struct tm timeinfo{};
+    if (strptime(str, "%FT%TZ", &timeinfo) == nullptr)
+    {
+        return 0;
+    }
+    return timegm(&timeinfo);
 }
+
 time_t str_to_timestamp_osmstate(const char* str)
 {
-    struct tm timeinfo;
-    strptime(str, "%FT%H\\:%M\\:%SZ", &timeinfo);
-    return mktime(&timeinfo);
+    struct tm timeinfo{};
+    if (strptime(str, "%FT%H\\:%M\\:%SZ", &timeinfo) == nullptr)
+    {
+        return 0;
+    }
+    return timegm(&timeinfo);
 }
+
 std::string timestamp_to_str(const time_t rawtime)
 {
     struct tm* dt;

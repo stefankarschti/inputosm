@@ -15,6 +15,7 @@
 #include "inputosmlog.h"
 #include "timeutil.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -46,9 +47,13 @@ enum class current_tag_t
 };
 current_tag_t current_tag;
 std::vector<std::string> current_strings;
-std::vector<tag_t> current_tags;
+std::vector<std::pair<int, int>> current_tags;
 std::vector<int64_t> current_refs;
-std::vector<relation_member_t> current_members;
+struct ext_relation_member_t : relation_member_t
+{
+    int role_index = -1;
+};
+std::vector<ext_relation_member_t> current_members;
 
 static void xml_start_node(const char **attr)
 {
@@ -80,7 +85,14 @@ static void xml_end_node()
 {
     // node end
     current_tag = current_tag_t::none;
-    current_node.tags = {current_tags.data(), current_tags.size()};
+    // assemble tags
+    std::vector<tag_t> tags;
+    for (std::size_t i = 0; i < current_tags.size(); i++)
+    {
+        tags.emplace_back(
+            tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
+    }
+    current_node.tags = {tags.data(), tags.size()};
     if (parser_enabled && node_handler) parser_enabled = node_handler({&current_node, 1});
     current_tags.clear();
     current_strings.clear();
@@ -104,7 +116,14 @@ static void xml_end_way()
 {
     // way end
     current_tag = current_tag_t::none;
-    current_way.tags = {current_tags.data(), current_tags.size()};
+    // assemble tags
+    std::vector<tag_t> tags;
+    for (std::size_t i = 0; i < current_tags.size(); i++)
+    {
+        tags.emplace_back(
+            tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
+    }
+    current_way.tags = {tags.data(), tags.size()};
     current_way.node_refs = {current_refs.data(), current_refs.size()};
     if (parser_enabled && way_handler) parser_enabled = way_handler({&current_way, 1});
     current_tags.clear();
@@ -130,8 +149,22 @@ static void xml_end_relation()
 {
     // end relation
     current_tag = current_tag_t::none;
-    current_relation.tags = {current_tags.data(), current_tags.size()};
-    current_relation.members = {current_members.data(), current_members.size()};
+    // assemble tags
+    std::vector<tag_t> tags;
+    for (std::size_t i = 0; i < current_tags.size(); i++)
+    {
+        tags.emplace_back(
+            tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
+    }
+    current_relation.tags = {tags.data(), tags.size()};
+    // assemble members
+    std::vector<relation_member_t> members;
+    for (const auto &m : current_members)
+    {
+        members.emplace_back(
+            relation_member_t{m.type, m.id, m.role_index >= 0 ? current_strings[m.role_index].c_str() : nullptr});
+    }
+    current_relation.members = {members.data(), members.size()};
     if (parser_enabled && relation_handler) parser_enabled = relation_handler({&current_relation, 1});
     current_tags.clear();
     current_strings.clear();
@@ -150,7 +183,7 @@ static void xml_start_xtag(const char **attr)
             if (strcmp(attr[i], "v") == 0) current_strings.emplace_back(attr[i + 1]);
         }
         for (auto i = istart; i < current_strings.size(); i += 2)
-            current_tags.emplace_back(tag_t{current_strings[i].c_str(), current_strings[i + 1].c_str()});
+            current_tags.emplace_back(std::pair<int, int>{i, i + 1});
     }
 }
 
@@ -171,27 +204,32 @@ static void xml_start_member(const char **attr)
     // member start
     if (current_tag == current_tag_t::relation)
     {
-        relation_member_t member;
+        ext_relation_member_t member;
         for (int i = 0; attr[i]; i += 2)
         {
             if (strcmp(attr[i], "ref") == 0) member.id = atoll(attr[i + 1]);
             if (strcmp(attr[i], "type") == 0)
             {
                 if (strcmp(attr[i + 1], "node") == 0) member.type = 0;
-                if (strcmp(attr[i + 1], "way") == 0) member.type = 2;
+                if (strcmp(attr[i + 1], "way") == 0) member.type = 1;
                 if (strcmp(attr[i + 1], "relation") == 0) member.type = 2;
             }
             if (strcmp(attr[i], "role") == 0)
             {
                 current_strings.emplace_back(attr[i + 1]);
-                member.role = current_strings.back().c_str();
+                member.role_index = current_strings.size() - 1;
             }
+        }
+        if (member.role_index < 0)
+        {
+            current_strings.emplace_back();
+            member.role_index = current_strings.size() - 1;
         }
         current_members.emplace_back(member);
     }
 }
 
-static void xml_start_tag(void */*data*/, const char *el, const char **attr)
+static void xml_start_tag(void * /*data*/, const char *el, const char **attr)
 {
     // XML tag start
     if (strcmp(el, "node") == 0) xml_start_node(attr);
@@ -207,7 +245,7 @@ static void xml_start_tag(void */*data*/, const char *el, const char **attr)
     if (strcmp(el, "delete") == 0) osc_mode = mode_t::destroy;
 }
 
-static void xml_end_tag(void */*data*/, const char *el)
+static void xml_end_tag(void * /*data*/, const char *el)
 {
     // XML tag end
     if (strcmp(el, "node") == 0) xml_end_node();
