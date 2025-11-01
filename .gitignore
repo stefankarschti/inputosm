@@ -1,6 +1,7 @@
 # artifacts
 build
 install
+/.cache
 
 # ide
 .vscode
