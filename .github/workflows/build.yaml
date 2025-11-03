@@ -1,12 +1,17 @@
 name: Build
 run-name: ${{github.actor}} build
-on: [push]
+on:
+  push:
+  pull_request:
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - run: sudo apt-get update && sudo apt-get install -y build-essential cmake
-      - run: cmake -Bbuild -S. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-      - run: cmake --build build -- -j$(nproc)
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake clang clang-tidy libexpat1-dev zlib1g-dev
+      - name: Configure
+        run: cmake -Bbuild -S. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      - name: Build
+        run: cmake --build build -- -j$(nproc)
 
