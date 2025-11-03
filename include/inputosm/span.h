@@ -20,7 +20,8 @@
 
 #include <cassert>
 
-namespace input_osm {
+namespace input_osm
+{
 
 template <typename T>
 class span_t
@@ -39,44 +40,32 @@ public:
     span_t() = default;
 
     span_t(const_pointer data, size_type size)
-    : mData{data}
-    , mSize{size}
+        : mData{data},
+          mSize{size}
     {
     }
 
     template <int64_t N>
     span_t(const value_type (&arr)[N])
-        : mData{arr}
-        , mSize{static_cast<size_type>(N)}
+        : mData{arr},
+          mSize{static_cast<size_type>(N)}
     {
     }
 
     template <typename Container>
     span_t(const Container& c)
-        : mData{c.data()}
-        , mSize{static_cast<size_type>(c.size())}
+        : mData{c.data()},
+          mSize{static_cast<size_type>(c.size())}
     {
     }
 
-    auto begin() const -> const_iterator
-    {
-        return cbegin();
-    }
+    auto begin() const -> const_iterator { return cbegin(); }
 
-    auto end() const -> const_iterator
-    {
-        return cend();
-    }
+    auto end() const -> const_iterator { return cend(); }
 
-    auto cbegin() const -> const_iterator
-    {
-        return mData;
-    }
+    auto cbegin() const -> const_iterator { return mData; }
 
-    auto cend() const -> const_iterator
-    {
-        return mData + mSize;
-    }
+    auto cend() const -> const_iterator { return mData + mSize; }
 
     auto operator[](size_type index) const -> const_reference
     {
@@ -84,20 +73,11 @@ public:
         return mData[index];
     }
 
-    auto data() const -> const_pointer
-    {
-        return mData;
-    }
+    auto data() const -> const_pointer { return mData; }
 
-    auto size() const -> size_type
-    {
-        return mSize;
-    }
+    auto size() const -> size_type { return mSize; }
 
-    bool empty() const
-    {
-        return 0 == mSize;
-    }
+    bool empty() const { return 0 == mSize; }
 
 private:
     const_pointer mData = nullptr;
@@ -110,6 +90,6 @@ std::enable_if_t<std::is_integral_v<S>, span_t<T>> makeSpan(const T* data, S siz
     return span_t<T>(data, static_cast<typename span_t<T>::size_type>(size));
 }
 
-} // namespace inputosm
+} // namespace input_osm
 
 #endif // INPUTOSM_SPAN_H

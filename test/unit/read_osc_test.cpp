@@ -22,7 +22,7 @@ std::map<std::string, std::string> collect_tags(input_osm::span_t<input_osm::tag
     }
     return result;
 }
-}
+} // namespace
 
 int main()
 {
@@ -170,13 +170,15 @@ int main()
                 return false;
             }
             const auto& node_member = relation.members[0];
-            if (node_member.type != 0 || node_member.id != 100 || !node_member.role || std::string(node_member.role) != "stop")
+            if (node_member.type != 0 || node_member.id != 100 || !node_member.role ||
+                std::string(node_member.role) != "stop")
             {
                 std::cerr << "Unexpected first relation member" << '\n';
                 return false;
             }
             const auto& way_member = relation.members[1];
-            if (way_member.type != 1 || way_member.id != 200 || !way_member.role || std::string(way_member.role) != "route")
+            if (way_member.type != 1 || way_member.id != 200 || !way_member.role ||
+                std::string(way_member.role) != "route")
             {
                 std::cerr << "Unexpected second relation member" << '\n';
                 return false;
