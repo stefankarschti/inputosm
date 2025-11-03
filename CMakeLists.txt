@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(CTest)
+
 # Toggle integration tests
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
@@ -53,6 +55,10 @@ target_include_directories(${LIBRARY_NAME} PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB)
+
+if(BUILD_TESTING)
+    add_subdirectory(test/unit)
+endif()
 
 # Tests
 if(INPUTOSM_INTEGRATION_TESTS)
