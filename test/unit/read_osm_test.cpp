@@ -51,25 +51,13 @@ struct RelationData
     std::map<std::string, std::string> tags;
 };
 
-const NodeData* find_node(const std::vector<NodeData>& nodes, int64_t id)
+template<typename T>
+const T* find_by_id(const std::vector<T>& items, int64_t id)
 {
-    const auto it = std::find_if(nodes.begin(), nodes.end(), [id](const NodeData& n) { return n.id == id; });
-    return it != nodes.end() ? &(*it) : nullptr;
-}
-
-const WayData* find_way(const std::vector<WayData>& ways, int64_t id)
-{
-    const auto it = std::find_if(ways.begin(), ways.end(), [id](const WayData& w) { return w.id == id; });
-    return it != ways.end() ? &(*it) : nullptr;
-}
-
-const RelationData* find_relation(const std::vector<RelationData>& relations, int64_t id)
-{
-    const auto it = std::find_if(relations.begin(), relations.end(), [id](const RelationData& r) { return r.id == id; });
-    return it != relations.end() ? &(*it) : nullptr;
+    const auto it = std::find_if(items.begin(), items.end(), [id](const T& item) { return item.id == id; });
+    return it != items.end() ? &(*it) : nullptr;
 }
 }
-
 int main()
 {
     const auto data_path = std::filesystem::path(__FILE__).parent_path() / "data" / "sample.osm";
