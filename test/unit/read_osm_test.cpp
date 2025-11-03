@@ -156,7 +156,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const NodeData* node1 = find_node(nodes, 1);
+    const NodeData* node1 = find_by_id(nodes, 1);
     if (!node1)
     {
         std::cerr << "Node 1 not found" << '\n';
@@ -200,7 +200,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const NodeData* node2 = find_node(nodes, 2);
+    const NodeData* node2 = find_by_id(nodes, 2);
     if (!node2)
     {
         std::cerr << "Node 2 not found" << '\n';
@@ -238,7 +238,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const WayData* way10 = find_way(ways, 10);
+    const WayData* way10 = find_by_id(ways, 10);
     if (!way10)
     {
         std::cerr << "Way 10 not found" << '\n';
@@ -277,7 +277,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const RelationData* relation20 = find_relation(relations, 20);
+    const RelationData* relation20 = find_by_id(relations, 20);
     if (!relation20)
     {
         std::cerr << "Relation 20 not found" << '\n';
