@@ -100,7 +100,7 @@ cmake --build build --target install
 Find with CMake in downstream project:
 
 ```cmake
-find_package(inputosm 0.3.0 REQUIRED)
+find_package(inputosm REQUIRED)
 target_link_libraries(mytool PRIVATE inputosm::inputosm)
 ```
 
