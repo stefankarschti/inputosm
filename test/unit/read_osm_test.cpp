@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <span>
 
 #include "test_utils.h"
 
@@ -52,12 +53,13 @@ struct RelationData
 };
 
 template <typename T>
-const T* find_by_id(const std::vector<T>& items, int64_t id)
+const T* find_by_id(const std::span<const T>& items, int64_t id)
 {
     const auto it = std::find_if(items.begin(), items.end(), [id](const T& item) { return item.id == id; });
     return it != items.end() ? &(*it) : nullptr;
 }
 } // namespace
+
 int main()
 {
     const auto data_path = std::filesystem::path(__FILE__).parent_path() / "data" / "sample.osm";
@@ -77,7 +79,7 @@ int main()
         [&nodes](input_osm::span_t<input_osm::node_t> batch) {
             for (const auto& node : batch)
             {
-                NodeData copy;
+                NodeData& copy = nodes.emplace_back();
                 copy.id = node.id;
                 copy.raw_latitude = node.raw_latitude;
                 copy.raw_longitude = node.raw_longitude;
@@ -86,16 +88,15 @@ int main()
                 copy.changeset = node.changeset;
                 for (const auto& tag : node.tags)
                 {
-                    copy.tags.emplace(tag.key ? tag.key : "", tag.value ? tag.value : "");
+                    if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }
-                nodes.emplace_back(std::move(copy));
             }
             return true;
         },
         [&ways](input_osm::span_t<input_osm::way_t> batch) {
             for (const auto& way : batch)
             {
-                WayData copy;
+                WayData& copy = ways.emplace_back();
                 copy.id = way.id;
                 copy.version = way.version;
                 copy.timestamp = way.timestamp;
@@ -103,31 +104,30 @@ int main()
                 copy.refs.assign(way.node_refs.begin(), way.node_refs.end());
                 for (const auto& tag : way.tags)
                 {
-                    copy.tags.emplace(tag.key ? tag.key : "", tag.value ? tag.value : "");
+                    if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }
-                ways.emplace_back(std::move(copy));
             }
             return true;
         },
         [&relations](input_osm::span_t<input_osm::relation_t> batch) {
             for (const auto& relation : batch)
             {
-                RelationData copy;
+                RelationData& copy = relations.emplace_back();
                 copy.id = relation.id;
                 copy.version = relation.version;
                 copy.timestamp = relation.timestamp;
                 copy.changeset = relation.changeset;
+                copy.members.reserve(relation.members.size());
                 for (const auto& member : relation.members)
                 {
-                    RelationMemberData member_copy;
+                    RelationMemberData& member_copy = copy.members.emplace_back();
                     member_copy.type = member.type;
                     member_copy.ref = member.id;
-                    member_copy.role = member.role ? member.role : "";
-                    copy.members.emplace_back(std::move(member_copy));
+                    if (member.role) member_copy.role = member.role;
                 }
                 for (const auto& tag : relation.tags)
                 {
-                    copy.tags.emplace(tag.key ? tag.key : "", tag.value ? tag.value : "");
+                    if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }
                 relations.emplace_back(std::move(copy));
             }
@@ -156,7 +156,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const NodeData* node1 = find_by_id(nodes, 1);
+    const NodeData* node1 = find_by_id(std::span<const NodeData>(nodes), 1);
     if (!node1)
     {
         std::cerr << "Node 1 not found" << '\n';
@@ -200,7 +200,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const NodeData* node2 = find_by_id(nodes, 2);
+    const NodeData* node2 = find_by_id(std::span<const NodeData>(nodes), 2);
     if (!node2)
     {
         std::cerr << "Node 2 not found" << '\n';
@@ -238,7 +238,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const WayData* way10 = find_by_id(ways, 10);
+    const WayData* way10 = find_by_id(std::span<const WayData>(ways), 10);
     if (!way10)
     {
         std::cerr << "Way 10 not found" << '\n';
@@ -277,7 +277,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    const RelationData* relation20 = find_by_id(relations, 20);
+    const RelationData* relation20 = find_by_id(std::span<const RelationData>(relations), 20);
     if (!relation20)
     {
         std::cerr << "Relation 20 not found" << '\n';
