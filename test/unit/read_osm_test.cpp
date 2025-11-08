@@ -129,7 +129,6 @@ int main()
                 {
                     if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }
-                relations.emplace_back(std::move(copy));
             }
             return true;
         });
