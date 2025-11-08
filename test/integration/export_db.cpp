@@ -13,28 +13,28 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-bool open_and_map(const char* filename, caddr_t &file_data, uint64_t &file_size)
+bool open_and_map(const char *filename, caddr_t &file_data, uint64_t &file_size)
 {
     struct stat mmapstat;
-    if(::stat(filename, &mmapstat) == -1)
+    if (::stat(filename, &mmapstat) == -1)
     {
         perror("stat");
         return false;
     }
     file_size = mmapstat.st_size;
-    if(0 == file_size)
+    if (0 == file_size)
     {
         file_data = nullptr;
         return true;
     }
     int fd;
-    if((fd = open(filename, O_RDONLY)) == -1)
+    if ((fd = open(filename, O_RDONLY)) == -1)
     {
         perror("open");
         return false;
     }
     file_data = (caddr_t)mmap((caddr_t)0, file_size, PROT_READ, MAP_SHARED, fd, 0);
-    if(file_data == (caddr_t)(-1))
+    if (file_data == (caddr_t)(-1))
     {
         perror("mmap");
     }
@@ -45,7 +45,7 @@ bool open_and_map(const char* filename, caddr_t &file_data, uint64_t &file_size)
 bool unmap_and_close(caddr_t file_data, uint64_t file_size)
 {
     int result = munmap(file_data, file_size);
-    if(result == -1)
+    if (result == -1)
     {
         perror("munmap");
     }
@@ -55,14 +55,14 @@ bool unmap_and_close(caddr_t file_data, uint64_t file_size)
 bool close_files(std::vector<int> &files)
 {
     bool result = true;
-    for(auto &fd: files)
+    for (auto &fd : files)
     {
-        if(-1 == ::close(fd))
+        if (-1 == ::close(fd))
         {
             perror("close");
             result = false;
         }
-        else        
+        else
         {
             fd = -1;
         }
@@ -72,21 +72,21 @@ bool close_files(std::vector<int> &files)
 
 bool concatenate_and_remove_files(const char *root_filename, size_t file_count)
 {
-    int foutput = ::open(root_filename, O_CREAT|O_WRONLY|O_TRUNC, 0644);
-    if(foutput == -1)
+    int foutput = ::open(root_filename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (foutput == -1)
     {
         perror("open");
         return false;
     }
     bool result = true;
-    for(size_t i = 0; i < file_count; ++i)
+    for (size_t i = 0; i < file_count; ++i)
     {
         std::string filename{root_filename + std::to_string(i)};
         caddr_t file_data{nullptr};
         uint64_t file_size{0};
-        if(open_and_map(filename.c_str(), file_data, file_size))
+        if (open_and_map(filename.c_str(), file_data, file_size))
         {
-            if(file_size > 0)
+            if (file_size > 0)
             {
                 ::write(foutput, file_data, file_size);
                 unmap_and_close(file_data, file_size);
@@ -97,10 +97,9 @@ bool concatenate_and_remove_files(const char *root_filename, size_t file_count)
             result = false;
     }
     ::close(foutput);
-    if(!result)
-        ::unlink(root_filename);
+    if (!result) ::unlink(root_filename);
     return result;
-} 
+}
 
 int main(int argc, char **argv)
 {
@@ -109,7 +108,7 @@ int main(int argc, char **argv)
         std::cerr << "Usage" << argv[0] << "<path-to-pbf> [read-metadata]\n";
         return EXIT_FAILURE;
     }
-    const char* path = argv[1];
+    const char *path = argv[1];
     std::cout << "importing " << path << "\n";
     input_osm::set_max_thread_count();
 
@@ -117,12 +116,12 @@ int main(int argc, char **argv)
     std::vector<int> node_files(input_osm::thread_count(), -1);
     std::vector<int> way_files(input_osm::thread_count(), -1);
     std::vector<int> relation_files(input_osm::thread_count(), -1);
-    for(size_t i = 0; i < input_osm::thread_count(); ++i)
+    for (size_t i = 0; i < input_osm::thread_count(); ++i)
     {
         using namespace std::string_literals;
-        node_files[i] = ::open(("node"s + std::to_string(i)).c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0644);
-        way_files[i] = ::open(("way"s + std::to_string(i)).c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0644);
-        relation_files[i] = ::open(("relation"s + std::to_string(i)).c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0644);
+        node_files[i] = ::open(("node"s + std::to_string(i)).c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        way_files[i] = ::open(("way"s + std::to_string(i)).c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        relation_files[i] = ::open(("relation"s + std::to_string(i)).c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
     }
     std::vector<uint64_t> node_count(input_osm::thread_count(), 0);
     std::vector<uint64_t> way_count(input_osm::thread_count(), 0);
@@ -131,11 +130,10 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             true,
-            [&node_count, &node_files](input_osm::span_t<input_osm::node_t> node_list) -> bool
-            { 
+            [&node_count, &node_files](input_osm::span_t<input_osm::node_t> node_list) -> bool {
                 node_count[input_osm::thread_index] += node_list.size();
                 int fd = node_files[input_osm::thread_index];
-                for(auto &n : node_list)
+                for (auto &n : node_list)
                 {
                     ::write(fd, &n.id, sizeof(int64_t));
                     int32_t lat{static_cast<int32_t>(n.raw_latitude)};
@@ -144,27 +142,7 @@ int main(int argc, char **argv)
                     ::write(fd, &lon, sizeof(int32_t));
                     int16_t size = n.tags.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for(auto &tag: n.tags)
-                    {
-                        ::write(fd, tag.key, strlen(tag.key) + 1);
-                        ::write(fd, tag.value, strlen(tag.value) + 1);
-                    }
-                }
-                return true; 
-            },
-            [&way_count, &way_files](input_osm::span_t<input_osm::way_t> way_list) -> bool
-            {
-                way_count[input_osm::thread_index] += way_list.size();
-                int fd = way_files[input_osm::thread_index];
-                for(auto &w : way_list)
-                {
-                    ::write(fd, &w.id, sizeof(int64_t));
-                    int16_t size = w.node_refs.size();
-                    ::write(fd, &size, sizeof(int16_t));
-                    ::write(fd, w.node_refs.data(), w.node_refs.size() * sizeof(int64_t));                
-                    size = w.tags.size();
-                    ::write(fd, &size, sizeof(int16_t));
-                    for(auto &tag: w.tags)
+                    for (auto &tag : n.tags)
                     {
                         ::write(fd, tag.key, strlen(tag.key) + 1);
                         ::write(fd, tag.value, strlen(tag.value) + 1);
@@ -172,16 +150,34 @@ int main(int argc, char **argv)
                 }
                 return true;
             },
-            [&relation_count, &relation_files](input_osm::span_t<input_osm::relation_t> relation_list) -> bool
-            {
+            [&way_count, &way_files](input_osm::span_t<input_osm::way_t> way_list) -> bool {
+                way_count[input_osm::thread_index] += way_list.size();
+                int fd = way_files[input_osm::thread_index];
+                for (auto &w : way_list)
+                {
+                    ::write(fd, &w.id, sizeof(int64_t));
+                    int16_t size = w.node_refs.size();
+                    ::write(fd, &size, sizeof(int16_t));
+                    ::write(fd, w.node_refs.data(), w.node_refs.size() * sizeof(int64_t));
+                    size = w.tags.size();
+                    ::write(fd, &size, sizeof(int16_t));
+                    for (auto &tag : w.tags)
+                    {
+                        ::write(fd, tag.key, strlen(tag.key) + 1);
+                        ::write(fd, tag.value, strlen(tag.value) + 1);
+                    }
+                }
+                return true;
+            },
+            [&relation_count, &relation_files](input_osm::span_t<input_osm::relation_t> relation_list) -> bool {
                 relation_count[input_osm::thread_index] += relation_list.size();
                 int fd = relation_files[input_osm::thread_index];
-                for(auto &r : relation_list)
+                for (auto &r : relation_list)
                 {
                     ::write(fd, &r.id, sizeof(int64_t));
                     int16_t size = r.members.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for(auto &m: r.members)
+                    for (auto &m : r.members)
                     {
                         ::write(fd, &m.id, sizeof(int64_t));
                         ::write(fd, m.role, strlen(m.role) + 1);
@@ -189,7 +185,7 @@ int main(int argc, char **argv)
                     }
                     size = r.tags.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for(auto &tag: r.tags)
+                    for (auto &tag : r.tags)
                     {
                         ::write(fd, tag.key, strlen(tag.key) + 1);
                         ::write(fd, tag.value, strlen(tag.value) + 1);

@@ -19,7 +19,8 @@
 #include <cstdint>
 #include <functional>
 
-namespace input_osm {
+namespace input_osm
+{
 
 struct tag_t
 {
@@ -32,7 +33,7 @@ struct node_t
     int64_t id = 0;
     int64_t raw_latitude = 0;
     int64_t raw_longitude = 0;
-    span_t<tag_t> tags;    
+    span_t<tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
@@ -73,7 +74,7 @@ struct relation_t
 static_assert(sizeof(relation_t) <= 64);
 
 enum class file_type_t
-{    
+{
     pbf,
     xml
 };
@@ -118,7 +119,7 @@ void set_log_level(log_level_t) noexcept;
  * @brief Log callback used for reporting back to the user
  * @note the message is a \0 terminated c-string
  */
-using log_callback_t = void(*)(log_level_t level, const char* message);
+using log_callback_t = void (*)(log_level_t level, const char* message);
 
 /**
  * @brief Set the log callback
@@ -133,6 +134,6 @@ extern thread_local size_t block_index;
 extern mode_t osc_mode;
 extern file_type_t file_type;
 
-} // namespace
+} // namespace input_osm
 
 #endif // !INPUTOSM_H

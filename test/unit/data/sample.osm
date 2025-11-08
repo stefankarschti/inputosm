@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="inputosm-test">
+  <node id="1" lat="52.5200" lon="13.4050" version="3" timestamp="2020-01-02T03:04:05Z" changeset="111">
+    <tag k="name" v="Node One"/>
+    <tag k="amenity" v="cafe"/>
+  </node>
+  <node id="2" lat="48.8566" lon="2.3522" version="2" timestamp="2020-02-03T04:05:06Z" changeset="222">
+    <tag k="name" v="Node Two"/>
+  </node>
+  <way id="10" version="4" timestamp="2020-03-04T05:06:07Z" changeset="333">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="A Street"/>
+  </way>
+  <relation id="20" version="5" timestamp="2020-04-05T06:07:08Z" changeset="444">
+    <member type="node" ref="1" role="stop"/>
+    <member type="way" ref="10" role="route"/>
+    <tag k="type" v="route"/>
+    <tag k="route" v="bus"/>
+  </relation>
+</osm>

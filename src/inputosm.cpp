@@ -67,7 +67,7 @@ bool input_file(const char* filename,
     constexpr std::string_view k_osc = ".osc";
     constexpr std::string_view k_pbf = ".pbf";
 
-    if (extension.compare(k_osm) == 0|| extension.compare(k_osc) == 0)
+    if (extension.compare(k_osm) == 0 || extension.compare(k_osc) == 0)
     {
         input_osm::file_type = file_type_t::xml;
     }
