@@ -18,7 +18,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cstdint>
-#include <numeric>
+#include <span>
 #include <vector>
 
 int main(int argc, char **argv)
@@ -42,8 +42,9 @@ int main(int argc, char **argv)
             path,
             read_metadata,
             [&node_count_by_lat,
-             actual_thread_count = input_osm::thread_count()](input_osm::span_t<input_osm::node_t> node_list) -> bool {
-                for (auto &n : node_list)
+             actual_thread_count = input_osm::thread_count()](const input_osm::node_t* node_list_, size_t node_list_size_) -> bool {
+                std::span<const input_osm::node_t> node_list(node_list_, node_list_size_);
+                for (const auto &n : node_list)
                 {
                     ++node_count_by_lat[input_osm::thread_index * actual_thread_count + std::abs(n.raw_latitude / 1e7)];
                 }

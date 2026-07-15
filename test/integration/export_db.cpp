@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <span>
 
 #include <fcntl.h>
 #include <sys/types.h>
@@ -130,8 +131,9 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             true,
-            [&node_count, &node_files](input_osm::span_t<input_osm::node_t> node_list) -> bool {
-                node_count[input_osm::thread_index] += node_list.size();
+            [&node_count, &node_files](const input_osm::node_t* node_list_, size_t node_list_size_) -> bool {
+                std::span<const input_osm::node_t> node_list(node_list_, node_list_size_);
+                node_count[input_osm::thread_index] += node_list_size_;
                 int fd = node_files[input_osm::thread_index];
                 for (auto &n : node_list)
                 {
@@ -140,9 +142,10 @@ int main(int argc, char **argv)
                     int32_t lon{static_cast<int32_t>(n.raw_longitude)};
                     ::write(fd, &lat, sizeof(int32_t));
                     ::write(fd, &lon, sizeof(int32_t));
-                    int16_t size = n.tags.size();
+                    int16_t size = n.tags_size;
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &tag : n.tags)
+                    std::span<const input_osm::tag_t> tags(n.tags, n.tags_size);
+                    for (auto &tag : tags)
                     {
                         ::write(fd, tag.key, strlen(tag.key) + 1);
                         ::write(fd, tag.value, strlen(tag.value) + 1);
@@ -150,18 +153,20 @@ int main(int argc, char **argv)
                 }
                 return true;
             },
-            [&way_count, &way_files](input_osm::span_t<input_osm::way_t> way_list) -> bool {
+            [&way_count, &way_files](const input_osm::way_t* way_list_, size_t way_list_size_) -> bool {
+                std::span<const input_osm::way_t> way_list(way_list_, way_list_size_);
                 way_count[input_osm::thread_index] += way_list.size();
                 int fd = way_files[input_osm::thread_index];
                 for (auto &w : way_list)
                 {
                     ::write(fd, &w.id, sizeof(int64_t));
-                    int16_t size = w.node_refs.size();
+                    int16_t size = w.node_refs_size;
                     ::write(fd, &size, sizeof(int16_t));
-                    ::write(fd, w.node_refs.data(), w.node_refs.size() * sizeof(int64_t));
-                    size = w.tags.size();
+                    ::write(fd, w.node_refs, w.node_refs_size * sizeof(int64_t));
+                    size = w.tags_size;
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &tag : w.tags)
+                    std::span<const input_osm::tag_t> tags(w.tags, w.tags_size);
+                    for (auto &tag : tags)
                     {
                         ::write(fd, tag.key, strlen(tag.key) + 1);
                         ::write(fd, tag.value, strlen(tag.value) + 1);
@@ -169,23 +174,26 @@ int main(int argc, char **argv)
                 }
                 return true;
             },
-            [&relation_count, &relation_files](input_osm::span_t<input_osm::relation_t> relation_list) -> bool {
-                relation_count[input_osm::thread_index] += relation_list.size();
+            [&relation_count, &relation_files](const input_osm::relation_t* relation_list_, size_t relation_list_size_ ) -> bool {
+                relation_count[input_osm::thread_index] += relation_list_size_;
                 int fd = relation_files[input_osm::thread_index];
+                std::span<const input_osm::relation_t> relation_list(relation_list_, relation_list_size_);
                 for (auto &r : relation_list)
                 {
                     ::write(fd, &r.id, sizeof(int64_t));
-                    int16_t size = r.members.size();
+                    int16_t size = r.members_size;
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &m : r.members)
+                    std::span<const input_osm::relation_member_t> members(r.members, r.members_size);
+                    for (auto &m : members)
                     {
                         ::write(fd, &m.id, sizeof(int64_t));
                         ::write(fd, m.role, strlen(m.role) + 1);
                         ::write(fd, &m.type, sizeof(int8_t));
                     }
-                    size = r.tags.size();
+                    size = r.tags_size;
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &tag : r.tags)
+                    std::span<const input_osm::tag_t> tags(r.tags, r.tags_size);
+                    for (auto &tag : tags)
                     {
                         ::write(fd, tag.key, strlen(tag.key) + 1);
                         ::write(fd, tag.value, strlen(tag.value) + 1);

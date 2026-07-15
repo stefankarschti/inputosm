@@ -8,12 +8,13 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace
 {
-std::map<std::string, std::string> collect_tags(input_osm::span_t<input_osm::tag_t> tags)
+std::map<std::string, std::string> collect_tags(std::span<input_osm::tag_t> tags)
 {
     std::map<std::string, std::string> result;
     for (const auto& tag : tags)
@@ -40,10 +41,10 @@ int main()
     const bool parse_ok = input_osm::input_file(
         data_path.string().c_str(),
         true,
-        [&](input_osm::span_t<input_osm::node_t> batch) {
-            if (batch.size() != 1)
+        [&](const input_osm::node_t* batch, size_t batch_size) {
+            if (batch_size != 1)
             {
-                std::cerr << "OSC node batch expected 1 entry, got " << batch.size() << '\n';
+                std::cerr << "OSC node batch expected 1 entry, got " << batch_size << '\n';
                 return false;
             }
             if (input_osm::osc_mode != input_osm::mode_t::create)
@@ -72,7 +73,7 @@ int main()
                 std::cerr << "Unexpected node timestamp" << '\n';
                 return false;
             }
-            const auto tags = collect_tags(node.tags);
+            const auto tags = collect_tags({node.tags, node.tags_size});
             const auto name_it = tags.find("name");
             if (name_it == tags.end() || name_it->second != "Create Node")
             {
@@ -88,10 +89,10 @@ int main()
             node_seen = true;
             return true;
         },
-        [&](input_osm::span_t<input_osm::way_t> batch) {
-            if (batch.size() != 1)
+        [&](const input_osm::way_t* batch, size_t batch_size) {
+            if (batch_size != 1)
             {
-                std::cerr << "OSC way batch expected 1 entry, got " << batch.size() << '\n';
+                std::cerr << "OSC way batch expected 1 entry, got " << batch_size << '\n';
                 return false;
             }
             if (input_osm::osc_mode != input_osm::mode_t::modify)
@@ -115,13 +116,13 @@ int main()
                 std::cerr << "Unexpected way timestamp" << '\n';
                 return false;
             }
-            const std::vector<int64_t> expected_refs{100, 101};
-            if (!std::equal(way.node_refs.begin(), way.node_refs.end(), expected_refs.begin(), expected_refs.end()))
+            const std::array<int64_t, 2> expected_refs{100, 101};
+            if (!std::equal(way.node_refs, way.node_refs + expected_refs.size(), expected_refs.begin(), expected_refs.end()))
             {
                 std::cerr << "Unexpected way node refs" << '\n';
                 return false;
             }
-            const auto tags = collect_tags(way.tags);
+            const auto tags = collect_tags({way.tags, way.tags_size});
             const auto highway_it = tags.find("highway");
             if (highway_it == tags.end() || highway_it->second != "secondary")
             {
@@ -137,10 +138,10 @@ int main()
             way_seen = true;
             return true;
         },
-        [&](input_osm::span_t<input_osm::relation_t> batch) {
-            if (batch.size() != 1)
+        [&](const input_osm::relation_t* batch, size_t batch_size) {
+            if (batch_size != 1)
             {
-                std::cerr << "OSC relation batch expected 1 entry, got " << batch.size() << '\n';
+                std::cerr << "OSC relation batch expected 1 entry, got " << batch_size << '\n';
                 return false;
             }
             if (input_osm::osc_mode != input_osm::mode_t::destroy)
@@ -164,7 +165,7 @@ int main()
                 std::cerr << "Unexpected relation timestamp" << '\n';
                 return false;
             }
-            if (relation.members.size() != 2)
+            if (relation.members_size != 2)
             {
                 std::cerr << "Unexpected relation members size" << '\n';
                 return false;
@@ -183,7 +184,7 @@ int main()
                 std::cerr << "Unexpected second relation member" << '\n';
                 return false;
             }
-            const auto tags = collect_tags(relation.tags);
+            const auto tags = collect_tags({relation.tags, relation.tags_size});
             const auto type_it = tags.find("type");
             if (type_it == tags.end() || type_it->second != "route")
             {

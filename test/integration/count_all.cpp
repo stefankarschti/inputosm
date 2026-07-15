@@ -50,16 +50,16 @@ int main(int argc, char** argv)
     if (!input_osm::input_file(
             path,
             read_metadata,
-            [&node_count](input_osm::span_t<input_osm::node_t> node_list) -> bool {
-                node_count[input_osm::thread_index] += node_list.size();
+            [&node_count](const input_osm::node_t*, size_t node_list_size) -> bool {
+                node_count[input_osm::thread_index] += node_list_size;
                 return true;
             },
-            [&way_count](input_osm::span_t<input_osm::way_t> way_list) -> bool {
-                way_count[input_osm::thread_index] += way_list.size();
+            [&way_count](const input_osm::way_t*, size_t way_list_size) -> bool {
+                way_count[input_osm::thread_index] += way_list_size;
                 return true;
             },
-            [&relation_count](input_osm::span_t<input_osm::relation_t> relation_list) -> bool {
-                relation_count[input_osm::thread_index] += relation_list.size();
+            [&relation_count](const input_osm::relation_t*, size_t relation_list_size) -> bool {
+                relation_count[input_osm::thread_index] += relation_list_size;
                 return true;
             }))
     {

@@ -76,7 +76,8 @@ int main()
     const bool parse_ok = input_osm::input_file(
         data_path.string().c_str(),
         true,
-        [&nodes](input_osm::span_t<input_osm::node_t> batch) {
+        [&nodes](const input_osm::node_t* batch_, size_t batch_size_) {
+            std::span<const input_osm::node_t> batch(batch_, batch_size_);
             for (const auto& node : batch)
             {
                 NodeData& copy = nodes.emplace_back();
@@ -86,14 +87,16 @@ int main()
                 copy.version = node.version;
                 copy.timestamp = node.timestamp;
                 copy.changeset = node.changeset;
-                for (const auto& tag : node.tags)
+                std::span<const input_osm::tag_t> tags(node.tags, node.tags_size);
+                for (const auto& tag : tags)
                 {
                     if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }
             }
             return true;
         },
-        [&ways](input_osm::span_t<input_osm::way_t> batch) {
+        [&ways](const input_osm::way_t* batch_, size_t batch_size_) {
+            std::span<const input_osm::way_t> batch(batch_, batch_size_);
             for (const auto& way : batch)
             {
                 WayData& copy = ways.emplace_back();
@@ -101,15 +104,17 @@ int main()
                 copy.version = way.version;
                 copy.timestamp = way.timestamp;
                 copy.changeset = way.changeset;
-                copy.refs.assign(way.node_refs.begin(), way.node_refs.end());
-                for (const auto& tag : way.tags)
+                copy.refs.assign(way.node_refs, way.node_refs + way.node_refs_size);
+                std::span<const input_osm::tag_t> tags(way.tags, way.tags_size);
+                for (const auto& tag : tags)
                 {
                     if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }
             }
             return true;
         },
-        [&relations](input_osm::span_t<input_osm::relation_t> batch) {
+        [&relations](const input_osm::relation_t* batch_, size_t batch_size_) {
+            std::span<const input_osm::relation_t> batch(batch_, batch_size_);
             for (const auto& relation : batch)
             {
                 RelationData& copy = relations.emplace_back();
@@ -117,15 +122,18 @@ int main()
                 copy.version = relation.version;
                 copy.timestamp = relation.timestamp;
                 copy.changeset = relation.changeset;
-                copy.members.reserve(relation.members.size());
-                for (const auto& member : relation.members)
+                copy.members.reserve(relation.members_size);
+
+                std::span<const input_osm::relation_member_t> members(relation.members, relation.members_size);
+                for (const auto& member : members)
                 {
                     RelationMemberData& member_copy = copy.members.emplace_back();
                     member_copy.type = member.type;
                     member_copy.ref = member.id;
                     if (member.role) member_copy.role = member.role;
                 }
-                for (const auto& tag : relation.tags)
+                std::span<const input_osm::tag_t> tags(relation.tags, relation.tags_size);
+                for (const auto& tag : tags)
                 {
                     if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
                 }

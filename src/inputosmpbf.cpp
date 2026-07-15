@@ -16,6 +16,7 @@
 #include "inputosmlog.h"
 #include "timeutil.h"
 
+#include <cassert>
 #include <cstdint>
 #include <cinttypes>
 #include <cstring>
@@ -41,9 +42,9 @@ namespace input_osm
  */
 
 extern bool decode_metadata;
-extern std::function<bool(span_t<node_t>)> node_handler;
-extern std::function<bool(span_t<way_t>)> way_handler;
-extern std::function<bool(span_t<relation_t>)> relation_handler;
+extern std::function<bool(const node_t*, size_t)> node_handler;
+extern std::function<bool(const way_t*, size_t)> way_handler;
+extern std::function<bool(const relation_t*, size_t)> relation_handler;
 
 extern bool verbose;
 struct field_t
@@ -336,7 +337,8 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                                 // finish up current node
                                 if (itag_start != tags.end())
                                 {
-                                    inode->tags = span_t{&(*itag_start), static_cast<size_t>(tags.end() - itag_start)};
+                                    inode->tags = &(*itag_start);
+                                    inode->tags_size = static_cast<size_t>(tags.end() - itag_start);
                                 }
                                 itag_start = tags.end();
                                 ++inode;
@@ -366,7 +368,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
         return false;
 
     // report nodes
-    if (!node_handler(span_t{node_list.data(), node_list.size()})) return false;
+    if (!node_handler(node_list.data(), node_list.size())) return false;
     return true;
     ;
 }
@@ -485,9 +487,16 @@ result_t read_way(uint8_t* ptr,
         // success:
         // node refs
         if (node_ref_begin != node_refs.size())
-            way.node_refs = {node_refs.data() + node_ref_begin, node_refs.size() - node_ref_begin};
+        {
+            way.node_refs = node_refs.data() + node_ref_begin;
+            way.node_refs_size = node_refs.size() - node_ref_begin;
+        }
         // tags
-        if (tags_begin != tags.size()) way.tags = {tags.data() + tags_begin, tags.size() - tags_begin};
+        if (tags_begin != tags.size())
+        {
+            way.tags = tags.data() + tags_begin;
+            way.tags_size = tags.size() - tags_begin;
+        }
         // add to list
         way_list.emplace_back(way);
     }
@@ -605,10 +614,17 @@ result_t read_relation(uint8_t* ptr,
     {
         // success:
         // tags
-        if (tags_begin != tags.size()) relation.tags = {tags.data() + tags_begin, tags.size() - tags_begin};
+        if (tags_begin != tags.size())
+        {
+            relation.tags = tags.data() + tags_begin;
+            relation.tags_size = tags.size() - tags_begin;
+        }
         // members
         if (members_begin != members.size())
-            relation.members = {members.data() + members_begin, members.size() - members_begin};
+        {
+            relation.members = members.data() + members_begin;
+            relation.members_size = members.size() - members_begin;
+        }
         // add to list
         relation_list.emplace_back(relation);
     }
@@ -714,11 +730,11 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
     {
         // report ways
         if (way_handler)
-            if (!way_handler(span_t{way_list.data(), way_list.size()})) return false;
+            if (!way_handler(way_list.data(), way_list.size())) return false;
 
         // report relations
         if (relation_handler)
-            if (!relation_handler(span_t{relation_list.data(), relation_list.size()})) return false;
+            if (!relation_handler(relation_list.data(), relation_list.size())) return false;
     }
     return result;
 }
@@ -953,20 +969,6 @@ bool input_blob_mem(uint8_t*& buffer,
     // handle blob in its own thread
     work_queue.push(work_item{buffer1, blob_size, handler, index});
     return true;
-}
-
-static size_t g_thread_count = 0;
-void set_thread_count(size_t count)
-{
-    g_thread_count = std::min(count, static_cast<size_t>(std::thread::hardware_concurrency()));
-}
-void set_max_thread_count()
-{
-    g_thread_count = std::thread::hardware_concurrency();
-}
-size_t thread_count()
-{
-    return g_thread_count ? g_thread_count : 1;
 }
 
 bool input_mem(uint8_t* file_begin, size_t file_size) noexcept

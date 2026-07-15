@@ -18,16 +18,17 @@
 #include <numeric>
 #include <map>
 #include <cstring>
+#include <span>
 #include <vector>
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
     if (argc < 2)
     {
         printf("Usage %s <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    const char *path = argv[1];
+    const char* path = argv[1];
 
     input_osm::set_max_thread_count();
     printf("running on %zu threads\n", input_osm::thread_count());
@@ -44,17 +45,19 @@ int main(int argc, char **argv)
             path,
             false,
             nullptr,
-            [&ferry_count, &ferry](input_osm::span_t<input_osm::way_t> way_list) -> bool {
-                for (auto &way : way_list)
+            [&ferry_count, &ferry](const input_osm::way_t* way_list_, size_t way_list_size_) -> bool {
+                std::span<const input_osm::way_t> way_list(way_list_, way_list_size_);
+                for (const auto& way : way_list)
                 {
-                    for (auto &tag : way.tags)
+                    std::span<const input_osm::tag_t> tags(way.tags, way.tags_size);
+                    for (auto& tag : tags)
                     {
                         if (strcmp(tag.key, "route") == 0 && strcmp(tag.value, "ferry") == 0)
                         {
                             ferry_count[input_osm::thread_index]++;
                             ferry[input_osm::thread_index].emplace_back(ferry_info{
                                 .way_id = way.id,
-                                .node_id = std::vector<int64_t>(way.node_refs.begin(), way.node_refs.end())});
+                                .node_id = std::vector<int64_t>(way.node_refs, way.node_refs + way.node_refs_size)});
                         }
                     }
                 }
@@ -73,11 +76,11 @@ int main(int argc, char **argv)
         int64_t raw_latitude;
     };
     std::map<int64_t, pos> node_coord;
-    for (auto &fv : ferry)
+    for (auto& fv : ferry)
     {
-        for (auto &f : fv)
+        for (auto& f : fv)
         {
-            for (auto &nid : f.node_id)
+            for (auto& nid : f.node_id)
             {
                 node_coord[nid] = pos{0, 0};
             }
@@ -88,8 +91,9 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             false,
-            [&node_coord](input_osm::span_t<input_osm::node_t> node_list) -> bool {
-                for (auto &node : node_list)
+            [&node_coord](const input_osm::node_t* node_list_, size_t node_list_size_) -> bool {
+                std::span<const input_osm::node_t> node_list(node_list_, node_list_size_);
+                for (auto& node : node_list)
                 {
                     auto it = node_coord.find(node.id);
                     if (node_coord.end() != it)

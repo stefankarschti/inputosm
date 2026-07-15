@@ -15,16 +15,13 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <numeric>
-#include <map>
 #include <cstring>
 #include <vector>
-#include <algorithm>
 #include <iostream>
-#include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <unordered_map>
+#include <span>
 #include <thread>
 
 #define _FILE_OFFSET_BITS 64
@@ -35,10 +32,10 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-bool write_file(const char *filename, std::vector<std::string> &lines)
+bool write_file(const char* filename, std::vector<std::string>& lines)
 {
     int64_t file_size = 0;
-    for (const auto &s : lines)
+    for (const auto& s : lines)
     {
         file_size += s.length();
     }
@@ -61,7 +58,7 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
             perror("open");
             return false;
         }
-        uint8_t *file_data = (uint8_t *)mmap((caddr_t)0, file_size, PROT_WRITE, MAP_SHARED, fd, 0);
+        uint8_t* file_data = (uint8_t*)mmap((caddr_t)0, file_size, PROT_WRITE, MAP_SHARED, fd, 0);
         if ((caddr_t)file_data == (caddr_t)(-1))
         {
             perror("mmap");
@@ -71,7 +68,7 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
         {
             // compute offsets
             std::vector<size_t> offsets;
-            for (size_t offset{0}; auto &s : lines)
+            for (size_t offset{0}; auto& s : lines)
             {
                 offsets.push_back(offset);
                 offset += s.length();
@@ -90,7 +87,7 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
                 worker_threads[index] = std::thread(work, index);
             }
             // wait for them to finish
-            for (auto &th : worker_threads)
+            for (auto& th : worker_threads)
             {
                 if (th.joinable()) th.join();
             }
@@ -105,14 +102,14 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
     return true;
 }
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
     if (argc < 2)
     {
         printf("Usage %s <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    const char *path = argv[1];
+    const char* path = argv[1];
     input_osm::set_max_thread_count();
     printf("running on %zu threads\n", input_osm::thread_count());
     std::vector<std::string> lines(input_osm::thread_count());
@@ -129,17 +126,19 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             true,
-            [&lines, &node_pos_thread](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool {
+            [&lines, &node_pos_thread](const input_osm::node_t* node_list_, size_t node_list_size_) noexcept -> bool {
                 std::stringstream ss;
-                for (auto &n : node_list)
+                std::span<const input_osm::node_t> node_list(node_list_, node_list_size_);
+                for (auto& n : node_list)
                 {
                     node_pos_thread[input_osm::thread_index][n.id].lat = n.raw_latitude;
                     node_pos_thread[input_osm::thread_index][n.id].lon = n.raw_longitude;
                     ss << n.id << ";0;0;" << n.timestamp << ";" << n.changeset << ";'";
-                    for (auto itag = n.tags.begin(); itag != n.tags.end(); ++itag)
+                    std::span<const input_osm::tag_t> tags(n.tags, n.tags_size);
+                    for (auto itag = tags.begin(); itag != tags.end(); ++itag)
                     {
                         ss << "\"" << itag->key << "\"=>\"" << itag->value << "\"";
-                        if (itag < n.tags.end() - 1) ss << ",";
+                        if (itag < tags.end() - 1) ss << ",";
                     }
                     ss << "';POINT(" << std::fixed << std::setprecision(7) << n.raw_latitude / 10'000'000.0 << " "
                        << n.raw_longitude / 10'000'000.0 << ")\n";
@@ -155,14 +154,14 @@ int main(int argc, char **argv)
     }
     std::cout << "writing nodes csv...\n";
     write_file("nodes.csv", lines);
-    for (auto &line : lines)
+    for (auto& line : lines)
     {
         line.clear();
         line.shrink_to_fit();
     }
     pos no_node{0, 0};
-    auto node_pos = [&node_pos_thread, &no_node](int64_t id) -> pos & {
-        for (auto &npt : node_pos_thread)
+    auto node_pos = [&node_pos_thread, &no_node](int64_t id) -> pos& {
+        for (auto& npt : node_pos_thread)
             if (auto it = npt.find(id); it != npt.end()) return it->second;
         return no_node;
     };
@@ -176,33 +175,37 @@ int main(int argc, char **argv)
             path,
             true,
             nullptr,
-            [&lines, &node_pos, &lines_way_node](input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool {
+            [&lines, &node_pos, &lines_way_node](const input_osm::way_t* way_list_,
+                                                 size_t way_list_size_) noexcept -> bool {
                 std::stringstream ss;
                 std::stringstream ss_way_node;
-                for (auto &way : way_list)
+                std::span<const input_osm::way_t> way_list(way_list_, way_list_size_);
+                for (auto& way : way_list)
                 {
+                    std::span<const input_osm::tag_t> tags(way.tags, way.tags_size);
                     ss << way.id << ";0;0;" << way.timestamp << ";" << way.changeset << ";'";
-                    for (auto itag = way.tags.begin(); itag != way.tags.end(); ++itag)
+                    for (auto itag = tags.begin(); itag != tags.end(); ++itag)
                     {
                         ss << "\"" << itag->key << "\"=>\"" << itag->value << "\"";
-                        if (itag < way.tags.end() - 1) ss << ",";
+                        if (itag < tags.end() - 1) ss << ",";
                     }
                     ss << "';{";
                     size_t sequence_id = 0;
-                    for (auto inode = way.node_refs.begin(); inode != way.node_refs.end(); ++inode)
+                    std::span<const int64_t> node_refs(way.node_refs, way.node_refs_size);
+                    for (auto inode = node_refs.begin(); inode != node_refs.end(); ++inode)
                     {
                         ss_way_node << way.id << ";" << *inode << ";" << sequence_id++ << "\n";
                         ss << *inode;
-                        if (inode < way.node_refs.end() - 1) ss << ",";
+                        if (inode < node_refs.end() - 1) ss << ",";
                     }
                     ss << "};";
                     ss << "BBOX();";
                     ss << "LINESTRING(";
-                    for (auto inode = way.node_refs.begin(); inode != way.node_refs.end(); ++inode)
+                    for (auto inode = node_refs.begin(); inode != node_refs.end(); ++inode)
                     {
-                        auto &n = node_pos(*inode);
+                        auto& n = node_pos(*inode);
                         ss << std::fixed << std::setprecision(7) << n.lat / 10'000'000.0 << " " << n.lon / 10'000'000.0;
-                        if (inode < way.node_refs.end() - 1) ss << ",";
+                        if (inode < node_refs.end() - 1) ss << ",";
                     }
                     ss << ")\n";
                 }
@@ -211,21 +214,24 @@ int main(int argc, char **argv)
                 return true;
             },
             [&lines_relations,
-             &lines_relation_members](input_osm::span_t<input_osm::relation_t> relation_list) noexcept -> bool {
+             &lines_relation_members](const input_osm::relation_t* relation_list_, size_t relation_list_size_) noexcept -> bool {
                 std::stringstream ss;
                 std::stringstream ss_members;
-                for (auto &relation : relation_list)
+                std::span<const input_osm::relation_t> relation_list(relation_list_, relation_list_size_);
+                for (auto& relation : relation_list)
                 {
                     ss << relation.id << ";0;0;" << relation.timestamp << ";" << relation.changeset << ";'";
-                    for (auto itag = relation.tags.begin(); itag != relation.tags.end(); ++itag)
+                    std::span<const input_osm::tag_t> tags(relation.tags, relation.tags_size);
+                    for (auto itag = tags.begin(); itag != tags.end(); ++itag)
                     {
                         ss << "\"" << itag->key << "\"=>\"" << itag->value << "\"";
-                        if (itag < relation.tags.end() - 1) ss << ",";
+                        if (itag < tags.end() - 1) ss << ",";
                     }
                     ss << "'\n";
 
                     size_t sequence_id = 0;
-                    for (auto imember = relation.members.begin(); imember != relation.members.end(); ++imember)
+                    std::span<const input_osm::relation_member_t> members(relation.members, relation.members_size);
+                    for (auto imember = members.begin(); imember != members.end(); ++imember)
                     {
                         const char types[3] = {'N', 'W', 'R'};
                         ss_members << relation.id << ";" << imember->id << ";" << types[imember->type] << ";\""

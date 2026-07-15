@@ -38,6 +38,7 @@ find_package(ZLIB REQUIRED)
 # Sources
 set(SOURCES
     "include/inputosm/inputosm.h"
+    "include/inputosm/inputosm_c.h"
     "src/inputosm.cpp"
     "src/inputosmpbf.cpp"
     "src/inputosmxml.cpp"

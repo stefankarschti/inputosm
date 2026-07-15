@@ -15,13 +15,13 @@ constexpr const char* kTrace = "trc";
 static input_osm::log_callback_t g_default_log_callback = [](input_osm::log_level_t lvl, const char* message) {
     switch (lvl)
     {
-        case input_osm::log_level_t::LOG_LEVEL_TRACE:
+        case input_osm::log_level_t::INPUTOSM_LOG_LEVEL_TRACE:
             printf("[%s]: %s\n", kTrace, message);
             return;
-        case input_osm::log_level_t::LOG_LEVEL_INFO:
+        case input_osm::log_level_t::INPUTOSM_LOG_LEVEL_INFO:
             printf("[%s]: %s\n", kInfo, message);
             return;
-        case input_osm::log_level_t::LOG_LEVEL_ERROR:
+        case input_osm::log_level_t::INPUTOSM_LOG_LEVEL_ERROR:
             printf("[%s]: %s\n", kError, message);
             return;
         default:
@@ -37,31 +37,26 @@ log_level_t g_log_level = []() {
     {
         if (strcmp(env_level, kError) == 0)
         {
-            return LOG_LEVEL_ERROR;
+            return INPUTOSM_LOG_LEVEL_ERROR;
         }
         else if (strcmp(env_level, kTrace) == 0)
         {
-            return LOG_LEVEL_TRACE;
+            return INPUTOSM_LOG_LEVEL_TRACE;
         }
     }
-    return LOG_LEVEL_INFO;
+    return INPUTOSM_LOG_LEVEL_INFO;
 }();
 
 log_callback_t g_log_callback = g_default_log_callback;
 
-void set_log_level(log_level_t level) noexcept
+void set_log_level(log_level_t log_level) noexcept
 {
-    g_log_level = level;
+    inputosm_set_log_level(log_level);
 }
 
 bool set_log_callback(log_callback_t log_callback) noexcept
 {
-    if (!log_callback)
-    {
-        return false;
-    }
-    g_log_callback = log_callback;
-    return true;
+    return inputosm_set_log_callback(log_callback);
 }
 
 void log(log_level_t level, const char* fmt, ...) noexcept
@@ -84,3 +79,18 @@ void log(log_level_t level, const char* fmt, ...) noexcept
 }
 
 } // namespace input_osm
+
+extern "C" void inputosm_set_log_level(const inputosm_log_level_t log_level) 
+{
+    input_osm::g_log_level = log_level;
+}
+
+extern "C" bool inputosm_set_log_callback(const inputosm_log_callback_t log_callback) 
+{
+    if (!log_callback)
+    {
+        return false;
+    }
+    input_osm::g_log_callback = log_callback;
+    return true;
+}

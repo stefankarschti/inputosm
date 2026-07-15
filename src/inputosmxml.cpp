@@ -29,9 +29,9 @@ namespace input_osm
 {
 
 extern bool decode_metadata;
-extern std::function<bool(span_t<node_t>)> node_handler;
-extern std::function<bool(span_t<way_t>)> way_handler;
-extern std::function<bool(span_t<relation_t>)> relation_handler;
+extern std::function<bool(const node_t*, size_t)> node_handler;
+extern std::function<bool(const way_t*, size_t)> way_handler;
+extern std::function<bool(const relation_t*, size_t)> relation_handler;
 
 bool parser_enabled;
 node_t current_node;
@@ -55,7 +55,7 @@ struct ext_relation_member_t : relation_member_t
 };
 std::vector<ext_relation_member_t> current_members;
 
-static void xml_start_node(const char **attr)
+static void xml_start_node(const char** attr)
 {
     // node start
     current_node = node_t();
@@ -92,13 +92,14 @@ static void xml_end_node()
         tags.emplace_back(
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
     }
-    current_node.tags = {tags.data(), tags.size()};
-    if (parser_enabled && node_handler) parser_enabled = node_handler({&current_node, 1});
+    current_node.tags = tags.data();
+    current_node.tags_size = tags.size();
+    if (parser_enabled && node_handler) parser_enabled = node_handler(&current_node, 1);
     current_tags.clear();
     current_strings.clear();
 }
 
-static void xml_start_way(const char **attr)
+static void xml_start_way(const char** attr)
 {
     // way start
     current_way = way_t();
@@ -123,15 +124,17 @@ static void xml_end_way()
         tags.emplace_back(
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
     }
-    current_way.tags = {tags.data(), tags.size()};
-    current_way.node_refs = {current_refs.data(), current_refs.size()};
-    if (parser_enabled && way_handler) parser_enabled = way_handler({&current_way, 1});
+    current_way.tags = tags.data();
+    current_way.tags_size = tags.size();
+    current_way.node_refs = current_refs.data();
+    current_way.node_refs_size = current_refs.size();
+    if (parser_enabled && way_handler) parser_enabled = way_handler(&current_way, 1);
     current_tags.clear();
     current_strings.clear();
     current_refs.clear();
 }
 
-static void xml_start_relation(const char **attr)
+static void xml_start_relation(const char** attr)
 {
     // relation start
     current_relation = relation_t();
@@ -156,22 +159,24 @@ static void xml_end_relation()
         tags.emplace_back(
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
     }
-    current_relation.tags = {tags.data(), tags.size()};
+    current_relation.tags = tags.data();
+    current_relation.tags_size = tags.size();
     // assemble members
     std::vector<relation_member_t> members;
-    for (const auto &m : current_members)
+    for (const auto& m : current_members)
     {
         members.emplace_back(
             relation_member_t{m.type, m.id, m.role_index >= 0 ? current_strings[m.role_index].c_str() : nullptr});
     }
-    current_relation.members = {members.data(), members.size()};
-    if (parser_enabled && relation_handler) parser_enabled = relation_handler({&current_relation, 1});
+    current_relation.members = members.data();
+    current_relation.members_size = members.size();
+    if (parser_enabled && relation_handler) parser_enabled = relation_handler(&current_relation, 1);
     current_tags.clear();
     current_strings.clear();
     current_members.clear();
 }
 
-static void xml_start_xtag(const char **attr)
+static void xml_start_xtag(const char** attr)
 {
     // tag start
     if (current_tag != current_tag_t::none)
@@ -187,7 +192,7 @@ static void xml_start_xtag(const char **attr)
     }
 }
 
-static void xml_start_nd(const char **attr)
+static void xml_start_nd(const char** attr)
 {
     // nd start
     if (current_tag == current_tag_t::way)
@@ -199,7 +204,7 @@ static void xml_start_nd(const char **attr)
     }
 }
 
-static void xml_start_member(const char **attr)
+static void xml_start_member(const char** attr)
 {
     // member start
     if (current_tag == current_tag_t::relation)
@@ -229,7 +234,7 @@ static void xml_start_member(const char **attr)
     }
 }
 
-static void xml_start_tag(void * /*data*/, const char *el, const char **attr)
+static void xml_start_tag(void* /*data*/, const char* el, const char** attr)
 {
     // XML tag start
     if (strcmp(el, "node") == 0) xml_start_node(attr);
@@ -245,7 +250,7 @@ static void xml_start_tag(void * /*data*/, const char *el, const char **attr)
     if (strcmp(el, "delete") == 0) osc_mode = mode_t::destroy;
 }
 
-static void xml_end_tag(void * /*data*/, const char *el)
+static void xml_end_tag(void* /*data*/, const char* el)
 {
     // XML tag end
     if (strcmp(el, "node") == 0) xml_end_node();
@@ -257,10 +262,10 @@ static void xml_end_tag(void * /*data*/, const char *el)
     if (strcmp(el, "delete") == 0) osc_mode = mode_t::bulk;
 }
 
-bool input_xml(const char *filename)
+bool input_xml(const char* filename)
 {
     bool result = true;
-    FILE *f = fopen(filename, "rb");
+    FILE* f = fopen(filename, "rb");
     if (!f)
     {
         perror(filename);

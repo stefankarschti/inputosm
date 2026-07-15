@@ -23,3 +23,7 @@ target_link_libraries(export_db PRIVATE Threads::Threads inputosm::inputosm)
 
 add_executable(custom_log custom_log.cpp)
 target_link_libraries(custom_log PRIVATE Threads::Threads inputosm::inputosm)
+
+add_executable(c_api c_api.c)
+set_target_properties(c_api PROPERTIES LINKER_LANGUAGE C C_STANDARD 99)
+target_link_libraries(c_api PRIVATE inputosm::inputosm)
