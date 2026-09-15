@@ -8,7 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 
-# Toggle integration tests
+# Set the build options.
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
 option(ENABLE_CLANG_TIDY "Enable clang-tidy checks" ON)
@@ -31,11 +31,11 @@ if (ENABLE_CLANG_TIDY)
     set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND};--extra-arg=-Wno-unknown-warning-option;--extra-arg=-Wno-pragmas")
 endif()
 
-# Inputosm deps
+# Find the dependencies for inputosm.
 find_package(EXPAT REQUIRED)
 find_package(ZLIB REQUIRED)
 
-# Sources
+# Specify the source files.
 set(SOURCES
     "include/inputosm/inputosm.h"
     "src/inputosm.cpp"
@@ -60,16 +60,16 @@ if(BUILD_TESTING)
     add_subdirectory(test/unit)
 endif()
 
-# Tests
+# Add the integration tests.
 if(INPUTOSM_INTEGRATION_TESTS)
     add_subdirectory(test/integration)
 endif()
 
-# Configure installation files
+# Configure the installation files.
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# Useful paths
+# Set the paths for the package files.
 set(${LIBRARY_NAME}_CMAKE_DIR ${CMAKE_CURRENT_LIST_DIR}/cmake)
 set(${LIBRARY_NAME}_INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/${LIBRARY_NAME})
 set(${LIBRARY_NAME}_GENERATED_PATH "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -90,7 +90,7 @@ configure_file(${${LIBRARY_NAME}_CMAKE_DIR}/version.h.in
 configure_file(${${LIBRARY_NAME}_CMAKE_DIR}/${LIBRARY_NAME}.pc.in
     ${${LIBRARY_NAME}_GENERATED_PATH}/${LIBRARY_NAME}.pc @ONLY)
 
-# Install actual files
+# Install the package files.
 install(
     DIRECTORY 
         include/${LIBRARY_NAME}

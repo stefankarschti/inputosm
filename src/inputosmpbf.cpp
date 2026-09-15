@@ -35,7 +35,7 @@ namespace input_osm
 {
 
 /**
- * @brief
+ * @brief References for the PBF format and Protocol Buffers.
  * @link https://wiki.openstreetmap.org/wiki/PBF_Format @endlink
  * @link https://developers.google.com/protocol-buffers/docs/encoding#structure @endlink
  */
@@ -80,7 +80,7 @@ struct string_table_t
     const char* get(uint32_t index) { return (const char*)st_buffer.data() + st_index[index]; }
 };
 
-// This primitive block's data
+// Data for this primitive block.
 thread_local string_table_t string_table;
 thread_local int32_t granularity = 100;
 thread_local int64_t lat_offset = 0;
@@ -131,24 +131,24 @@ inline int64_t read_varint_int64(uint8_t*& ptr) noexcept
 
 inline uint8_t* read_field(uint8_t* ptr, field_t& field) noexcept
 {
-    field.key = read_varint_uint64(ptr); // BUGFIX: id5wt3 is actually a varint
+    field.key = read_varint_uint64(ptr); // The field key is a varint.
     field.pointer = ptr;
-    switch (field.key & 0x07) // wt
+    switch (field.key & 0x07) // Wire type
     {
-        case 0: // varint
+        case 0: // Varint
             field.value_uint64 = read_varint_uint64(ptr);
             field.length = ptr - field.pointer;
             break;
-        case 1: // 64-bit
+        case 1: // 64-bit field
             field.length = 8;
             ptr += field.length;
             break;
-        case 2: // length-delimited
+        case 2: // Length-delimited field
             field.length = read_varint_uint64(ptr);
             field.pointer = ptr;
             ptr += field.length;
             break;
-        case 5: // 32-bit
+        case 5: // 32-bit field
             field.length = 4;
             ptr += field.length;
             break;
@@ -197,7 +197,7 @@ inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler) noexce
 inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
 {
     return iterate_fields(ptr, end, [&](field_t& field) -> bool {
-        if (field.key == KEY(1, 2)) // string
+        if (field.key == KEY(1, 2)) // String
             string_table.add(field.pointer, field.length);
         return true;
     });
@@ -233,7 +233,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
     if (!iterate_fields(ptr, end, [&](field_t& field) -> bool {
             switch (field.key)
             {
-                case KEY(1, 2): // node ids. delta encoded
+                case KEY(1, 2): // Delta-encoded node IDs
                 {
                     int64_t id = 0;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length;)
@@ -244,13 +244,13 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                     }
                 }
                 break;
-                case KEY(5, 2): // dense infos
+                case KEY(5, 2): // Metadata for dense nodes
                     if (decode_metadata)
                     {
                         iterate_fields(field.pointer, field.pointer + field.length, [](field_t& field) -> bool {
                             switch (field.key)
                             {
-                                case KEY(1, 2): // versions. not delta encoded
+                                case KEY(1, 2): // Versions without delta encoding
                                 {
                                     auto inode = node_list.begin();
                                     for (auto ptr = field.pointer;
@@ -261,7 +261,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                                     }
                                 }
                                 break;
-                                case KEY(2, 2): // timestamps. delta encoded
+                                case KEY(2, 2): // Delta-encoded timestamps
                                 {
                                     int64_t timestamp = 0;
                                     auto inode = node_list.begin();
@@ -274,7 +274,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                                     }
                                 }
                                 break;
-                                case KEY(3, 2): // changesets. delta encoded
+                                case KEY(3, 2): // Delta-encoded changesets
                                 {
                                     int64_t changeset = 0;
                                     auto inode = node_list.begin();
@@ -292,7 +292,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                         });
                     }
                     break;
-                case KEY(8, 2): // latitudes. delta encoded
+                case KEY(8, 2): // Delta-encoded latitudes
                 {
                     int64_t latitude = 0;
                     auto inode = node_list.begin();
@@ -304,7 +304,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                     }
                 }
                 break;
-                case KEY(9, 2): // longitudes. delta encoded
+                case KEY(9, 2): // Delta-encoded longitudes
                 {
                     int64_t longitude = 0;
                     auto inode = node_list.begin();
@@ -316,7 +316,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                     }
                 }
                 break;
-                case KEY(10, 2): // packed indexes to keys & values
+                case KEY(10, 2): // Packed indexes for keys and values
                 {
                     bool invalid = true;
                     while (invalid)
@@ -329,11 +329,11 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                         size_t tags_size = tags.size();
                         for (auto ptr = field.pointer; ptr < field.pointer + field.length;)
                         {
-                            // read key
+                            // Read the key index.
                             uint32_t istring = read_varint_uint64(ptr);
                             if (!istring)
                             {
-                                // finish up current node
+                                // Complete this node.
                                 if (itag_start != tags.end())
                                 {
                                     inode->tags = span_t{&(*itag_start), static_cast<size_t>(tags.end() - itag_start)};
@@ -342,17 +342,17 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
                                 ++inode;
                                 continue;
                             }
-                            // add to tags
+                            // Add a tag.
                             tags.emplace_back();
                             ++tags_size;
-                            // get key
+                            // Get the key string.
                             tags.back().key = string_table.get(istring);
-                            // read value
+                            // Read the value string.
                             tags.back().value = string_table.get(read_varint_uint64(ptr));
-                            // check for invalidity
+                            // Compare the tag count with the previous capacity.
                             if (tags_size > previous_capacity)
                             {
-                                // all references to tags are invalid. restart.
+                                // The tag addresses changed. Read the tags again.
                                 invalid = true;
                                 break;
                             }
@@ -365,7 +365,7 @@ bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
         }))
         return false;
 
-    // report nodes
+    // Call the node handler.
     if (!node_handler(span_t{node_list.data(), node_list.size()})) return false;
     return true;
     ;
@@ -377,13 +377,13 @@ bool read_info(T& obj, uint8_t* ptr, uint8_t* end) noexcept
     return iterate_fields(ptr, end, [&](field_t& field) -> bool {
         switch (field.key)
         {
-            case KEY(1, 0): // version
+            case KEY(1, 0): // Version
                 obj.version = field.value_uint64;
                 break;
-            case KEY(2, 0): // timestamp
+            case KEY(2, 0): // Timestamp
                 obj.timestamp = field.value_uint64;
                 break;
-            case KEY(3, 0): // changeset
+            case KEY(3, 0): // Changeset
                 obj.changeset = field.value_uint64;
                 break;
         }
@@ -412,10 +412,10 @@ result_t read_way(uint8_t* ptr,
     if (!iterate_fields(ptr, end, [&](field_t& field) -> bool {
             switch (field.key)
             {
-                case KEY(1, 0): // way id
+                case KEY(1, 0): // Way ID
                     way.id = field.value_uint64;
                     break;
-                case KEY(2, 2): // packed keys
+                case KEY(2, 2): // Packed key indexes
                 {
                     int index = tags_begin;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -429,7 +429,7 @@ result_t read_way(uint8_t* ptr,
                     }
                 }
                 break;
-                case KEY(3, 2): // packed values
+                case KEY(3, 2): // Packed value indexes
                 {
                     int index = tags_begin;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -443,10 +443,10 @@ result_t read_way(uint8_t* ptr,
                     }
                 }
                 break;
-                case KEY(4, 2): // way info
+                case KEY(4, 2): // Way metadata
                     if (decode_metadata) read_info<way_t>(way, field.pointer, field.pointer + field.length);
                     break;
-                case KEY(8, 2): // node refs
+                case KEY(8, 2): // Node references
                 {
                     int64_t id = 0;
                     size_t previous_capacity = node_refs.capacity();
@@ -470,10 +470,10 @@ result_t read_way(uint8_t* ptr,
             return true;
         }))
     {
-        // error:
+        // There was an error during the read operation.
         if (result_t::eoutofmem == result)
         {
-            // cleanup
+            // Remove the data that is not complete.
             node_refs.erase(node_refs.begin() + node_ref_begin, node_refs.end());
             tags.erase(tags.begin() + tags_begin, tags.end());
         }
@@ -482,13 +482,13 @@ result_t read_way(uint8_t* ptr,
     }
     else
     {
-        // success:
-        // node refs
+        // The read operation is complete.
+        // Node references
         if (node_ref_begin != node_refs.size())
             way.node_refs = {node_refs.data() + node_ref_begin, node_refs.size() - node_ref_begin};
-        // tags
+        // Tags
         if (tags_begin != tags.size()) way.tags = {tags.data() + tags_begin, tags.size() - tags_begin};
-        // add to list
+        // Add the entity to the list.
         way_list.emplace_back(way);
     }
 
@@ -509,10 +509,10 @@ result_t read_relation(uint8_t* ptr,
     if (!iterate_fields(ptr, end, [&](field_t& field) -> bool {
             switch (field.key)
             {
-                case KEY(1, 0): // relation id
+                case KEY(1, 0): // Relation ID
                     relation.id = field.value_uint64;
                     break;
-                case KEY(2, 2): // packed keys
+                case KEY(2, 2): // Packed key indexes
                 {
                     int index = tags_begin;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -526,7 +526,7 @@ result_t read_relation(uint8_t* ptr,
                     }
                 }
                 break;
-                case KEY(3, 2): // packed values
+                case KEY(3, 2): // Packed value indexes
                 {
                     int index = tags_begin;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -540,10 +540,10 @@ result_t read_relation(uint8_t* ptr,
                     }
                 }
                 break;
-                case KEY(4, 2): // relation info
+                case KEY(4, 2): // Relation metadata
                     if (decode_metadata) read_info<relation_t>(relation, field.pointer, field.pointer + field.length);
                     break;
-                case KEY(8, 2): // member roles
+                case KEY(8, 2): // Member roles
                 {
                     int index = members_begin;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -557,7 +557,7 @@ result_t read_relation(uint8_t* ptr,
                     }
                 }
                 break;
-                case KEY(9, 2): // member ids
+                case KEY(9, 2): // Member IDs
                 {
                     int index = members_begin;
                     int64_t id = 0;
@@ -573,7 +573,7 @@ result_t read_relation(uint8_t* ptr,
                     }
                 }
                 break;
-                case KEY(10, 2): // member types
+                case KEY(10, 2): // Member types
                 {
                     int index = members_begin;
                     for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
@@ -591,10 +591,10 @@ result_t read_relation(uint8_t* ptr,
             return true;
         }))
     {
-        // error:
+        // There was an error during the read operation.
         if (result_t::eoutofmem == result)
         {
-            // cleanup
+            // Remove the data that is not complete.
             tags.erase(tags.begin() + tags_begin, tags.end());
             members.erase(members.begin() + members_begin, members.end());
         }
@@ -603,13 +603,13 @@ result_t read_relation(uint8_t* ptr,
     }
     else
     {
-        // success:
-        // tags
+        // The read operation is complete.
+        // Tags
         if (tags_begin != tags.size()) relation.tags = {tags.data() + tags_begin, tags.size() - tags_begin};
-        // members
+        // Members
         if (members_begin != members.size())
             relation.members = {members.data() + members_begin, members.size() - members_begin};
-        // add to list
+        // Add the entity to the list.
         relation_list.emplace_back(relation);
     }
 
@@ -632,7 +632,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
     thread_local std::vector<relation_member_t> relation_members(128000);
     relation_members.clear();
 
-    // read elements
+    // Read the entities.
     size_t nodes_read{0}, ways_read{0}, relations_read{0};
     bool restart_ways = true;
     bool restart_relations = true;
@@ -644,16 +644,16 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
         result = iterate_fields(ptr, end, [&](field_t& field) -> bool {
             switch (field.key)
             {
-                case KEY(1, 2): // node
+                case KEY(1, 2): // Node
                     break;
-                case KEY(2, 2): // dense nodes
+                case KEY(2, 2): // Dense nodes
                     if (node_index++ >= nodes_read && node_handler)
                     {
                         if (!read_dense_nodes(field.pointer, field.pointer + field.length)) return false;
                         nodes_read++;
                     }
                     break;
-                case KEY(3, 2): // way
+                case KEY(3, 2): // Way
                     if (way_index++ >= ways_read && way_handler)
                     {
                         switch (
@@ -669,7 +669,7 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
                         ways_read++;
                     }
                     break;
-                case KEY(4, 2): // relation
+                case KEY(4, 2): // Relation
                     if (relation_index++ >= relations_read && relation_handler)
                     {
                         switch (read_relation(field.pointer,
@@ -712,11 +712,11 @@ bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
     }
     if (result)
     {
-        // report ways
+        // Call the way handler.
         if (way_handler)
             if (!way_handler(span_t{way_list.data(), way_list.size()})) return false;
 
-        // report relations
+        // Call the relation handler.
         if (relation_handler)
             if (!relation_handler(span_t{relation_list.data(), relation_list.size()})) return false;
     }
@@ -731,26 +731,26 @@ bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
     return iterate_fields(ptr, end, [&](field_t& field) -> bool {
         switch (field.key)
         {
-            case KEY(1, 2): // string table
+            case KEY(1, 2): // String table
                 string_table.init(field.length);
                 if (!read_string_table(field.pointer, field.pointer + field.length)) return false;
                 break;
-            case KEY(2, 2): // primitive group
+            case KEY(2, 2): // Primitive group
                 if (!read_primitive_group(field.pointer, field.pointer + field.length)) return false;
                 break;
-            case KEY(17, 0): // granularity in nanodegrees
+            case KEY(17, 0): // Coordinate granularity in nanodegrees
                 granularity = (int64_t)field.value_uint64;
                 IOSM_TRACE("granularity: %" PRId32 " nanodegrees", granularity);
                 break;
-            case KEY(18, 0): // date granularity in milliseconds
+            case KEY(18, 0): // Timestamp granularity in milliseconds
                 date_granularity = (int64_t)field.value_uint64;
                 IOSM_TRACE("date granularity: %" PRId32 " milliseconds", date_granularity);
                 break;
-            case KEY(19, 0): // latitude offset in nanodegrees
+            case KEY(19, 0): // Latitude offset in nanodegrees
                 lat_offset = (int64_t)field.value_uint64;
                 IOSM_TRACE("latitude offset: %" PRId32 " nanodegrees", lat_offset);
                 break;
-            case KEY(20, 0): // longitude offset in nanodegrees
+            case KEY(20, 0): // Longitude offset in nanodegrees
                 lon_offset = (int64_t)field.value_uint64;
                 IOSM_TRACE("longitude offset: %" PRId32 " nanodegrees", lon_offset);
                 break;
@@ -779,16 +779,16 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                                     [&left, &right, &top, &bottom](field_t& field) -> bool {
                                         switch (field.key)
                                         {
-                                            case KEY(1, 0): // left
+                                            case KEY(1, 0): // Left boundary
                                                 left = to_sint64(field.value_uint64);
                                                 break;
-                                            case KEY(2, 0): // right
+                                            case KEY(2, 0): // Right boundary
                                                 right = to_sint64(field.value_uint64);
                                                 break;
-                                            case KEY(3, 0): // top
+                                            case KEY(3, 0): // Top boundary
                                                 top = to_sint64(field.value_uint64);
                                                 break;
-                                            case KEY(4, 0): // bottom
+                                            case KEY(4, 0): // Bottom boundary
                                                 bottom = to_sint64(field.value_uint64);
                                                 break;
                                         }
@@ -801,19 +801,19 @@ bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
                     "left: %.9f right: %.9f top: %.9f bottom: %.9f", left / 1e9, right / 1e9, top / 1e9, bottom / 1e9);
             }
             break;
-            case KEY(4, 2): // required features
+            case KEY(4, 2): // Required features
                 required_features.emplace_back(std::string((const char*)field.pointer, field.length));
                 IOSM_TRACE("required feature: %s", required_features.back().c_str());
                 break;
-            case KEY(5, 2): // optional features
+            case KEY(5, 2): // Optional features
                 optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
                 IOSM_TRACE("optional feature: %s", optional_features.back().c_str());
                 break;
-            case KEY(16, 2): // writing program
+            case KEY(16, 2): // Program that wrote the file
                 writing_program = std::string((const char*)field.pointer, field.length);
                 IOSM_TRACE("writing_program: %s", writing_program.c_str());
                 break;
-            case KEY(17, 2): // source
+            case KEY(17, 2): // Source
                 source = std::string((const char*)field.pointer, field.length);
                 IOSM_TRACE("source: %s", source.c_str());
                 break;
@@ -880,11 +880,11 @@ bool handle_blob(work_item& wi) noexcept
     iterate_fields(wi.buffer1, wi.buffer1 + wi.blob_size, [&](field_t& field) -> bool {
         switch (field.key)
         {
-            case KEY(1, 2): // raw
+            case KEY(1, 2): // Raw data
                 raw_size = field.length;
                 raw_ptr = field.pointer;
                 break;
-            case KEY(2, 0): // raw size
+            case KEY(2, 0): // Raw data size
                 raw_size = field.value_uint64;
                 break;
             case KEY(3, 2): // zlib_data
@@ -895,7 +895,7 @@ bool handle_blob(work_item& wi) noexcept
         return true;
     });
 
-    // unzip if necessary
+    // Decompress the data if necessary.
     if (zip_ptr && zip_sz && raw_size)
     {
         assert(zip_ptr >= wi.buffer1 && zip_ptr < wi.buffer1 + wi.blob_size);
@@ -908,7 +908,7 @@ bool handle_blob(work_item& wi) noexcept
         }
     }
 
-    // use blob data
+    // Call the handler with the blob data.
     bool result = true;
     if (wi.handler) result = wi.handler(raw_ptr, raw_ptr + raw_size);
     return result;
@@ -921,7 +921,7 @@ bool input_blob_mem(uint8_t*& buffer,
                     bool (*handler)(uint8_t*, uint8_t*),
                     size_t index) noexcept
 {
-    // read BlobHeader
+    // Read the BlobHeader.
     uint8_t* header_buffer = buffer;
     buffer += header_size;
     if (buffer > buffer_end) return false;
@@ -933,7 +933,7 @@ bool input_blob_mem(uint8_t*& buffer,
     iterate_fields(header_buffer, header_buffer + header_size, [&](field_t& field) -> bool {
         switch (field.key)
         {
-            case KEY(1, 2): // type
+            case KEY(1, 2): // Type
                 expected_header_found = (field.length == expected_type_len) &&
                                         (memcmp(field.pointer, expected_type, expected_type_len) == 0);
                 break;
@@ -945,12 +945,12 @@ bool input_blob_mem(uint8_t*& buffer,
     });
     if (!expected_header_found || !blob_size) return false;
 
-    // read Blob
+    // Read the Blob.
     uint8_t* buffer1 = buffer;
     buffer += blob_size;
     if (buffer > buffer_end) return false;
 
-    // handle blob in its own thread
+    // Add the blob to the work queue.
     work_queue.push(work_item{buffer1, blob_size, handler, index});
     return true;
 }
@@ -971,7 +971,7 @@ size_t thread_count()
 
 bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
 {
-    // iterate file blocks
+    // Read the file blocks.
     {
         uint8_t* file_end = file_begin + file_size;
         uint8_t* buf = file_begin;
@@ -986,11 +986,11 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
         buf += 4;
         if (!input_blob_mem(buf, file_end, header_size, "OSMHeader", read_header_block, index++)) return false;
 
-        // data blobs
+        // Data blobs
         while (buf < file_end)
         {
             IOSM_TRACE("reading block %" PRIu64 " offset %" PRId64, index, buf - file_begin);
-            // header size
+            // Header size
             if (buf + 4 > file_end) break;
             header_size = read_net_uint32(buf);
             buf += 4;
@@ -1000,17 +1000,17 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
         IOSM_TRACE("block work queue has  %" PRIu64 " items", work_queue.size());
     }
 
-    // handle blobs
+    // Process the blobs.
     if (thread_count() > 1)
     {
-        // spawn workers
+        // Start the worker threads.
         std::vector<std::thread> worker_threads(thread_count());
         for (size_t index{0}; index < thread_count(); index++)
         {
             worker_threads[index] = std::thread(work, index);
         }
 
-        // wait for them to finish
+        // Wait for all worker threads to stop.
         for (auto& th : worker_threads)
         {
             if (th.joinable()) th.join();
@@ -1018,7 +1018,7 @@ bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
     }
     else
     {
-        // 1 thread, so call the work function directly
+        // Call the work function directly when there is only one thread.
         work(0);
     }
 

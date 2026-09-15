@@ -57,7 +57,7 @@ std::vector<ext_relation_member_t> current_members;
 
 static void xml_start_node(const char **attr)
 {
-    // node start
+    // Start a new node.
     current_node = node_t();
     current_tag = current_tag_t::node;
     for (int i = 0; attr[i]; i += 2)
@@ -83,9 +83,9 @@ static void xml_start_node(const char **attr)
 
 static void xml_end_node()
 {
-    // node end
+    // Complete this node.
     current_tag = current_tag_t::none;
-    // assemble tags
+    // Make the tag list.
     std::vector<tag_t> tags;
     for (std::size_t i = 0; i < current_tags.size(); i++)
     {
@@ -100,7 +100,7 @@ static void xml_end_node()
 
 static void xml_start_way(const char **attr)
 {
-    // way start
+    // Start a new way.
     current_way = way_t();
     current_tag = current_tag_t::way;
     for (int i = 0; attr[i]; i += 2)
@@ -114,9 +114,9 @@ static void xml_start_way(const char **attr)
 
 static void xml_end_way()
 {
-    // way end
+    // Complete this way.
     current_tag = current_tag_t::none;
-    // assemble tags
+    // Make the tag list.
     std::vector<tag_t> tags;
     for (std::size_t i = 0; i < current_tags.size(); i++)
     {
@@ -133,7 +133,7 @@ static void xml_end_way()
 
 static void xml_start_relation(const char **attr)
 {
-    // relation start
+    // Start a new relation.
     current_relation = relation_t();
     current_tag = current_tag_t::relation;
     for (int i = 0; attr[i]; i += 2)
@@ -147,9 +147,9 @@ static void xml_start_relation(const char **attr)
 
 static void xml_end_relation()
 {
-    // end relation
+    // Complete this relation.
     current_tag = current_tag_t::none;
-    // assemble tags
+    // Make the tag list.
     std::vector<tag_t> tags;
     for (std::size_t i = 0; i < current_tags.size(); i++)
     {
@@ -157,7 +157,7 @@ static void xml_end_relation()
             tag_t{current_strings[current_tags[i].first].c_str(), current_strings[current_tags[i].second].c_str()});
     }
     current_relation.tags = {tags.data(), tags.size()};
-    // assemble members
+    // Make the list of relation members.
     std::vector<relation_member_t> members;
     for (const auto &m : current_members)
     {
@@ -173,7 +173,7 @@ static void xml_end_relation()
 
 static void xml_start_xtag(const char **attr)
 {
-    // tag start
+    // Read the tag key and value.
     if (current_tag != current_tag_t::none)
     {
         size_t istart = current_strings.size();
@@ -189,7 +189,7 @@ static void xml_start_xtag(const char **attr)
 
 static void xml_start_nd(const char **attr)
 {
-    // nd start
+    // Read the node reference.
     if (current_tag == current_tag_t::way)
     {
         for (int i = 0; attr[i]; i += 2)
@@ -201,7 +201,7 @@ static void xml_start_nd(const char **attr)
 
 static void xml_start_member(const char **attr)
 {
-    // member start
+    // Read the relation member.
     if (current_tag == current_tag_t::relation)
     {
         ext_relation_member_t member;
@@ -231,7 +231,7 @@ static void xml_start_member(const char **attr)
 
 static void xml_start_tag(void * /*data*/, const char *el, const char **attr)
 {
-    // XML tag start
+    // Process the start of an XML element.
     if (strcmp(el, "node") == 0) xml_start_node(attr);
     if (strcmp(el, "way") == 0) xml_start_way(attr);
     if (strcmp(el, "relation") == 0) xml_start_relation(attr);
@@ -247,7 +247,7 @@ static void xml_start_tag(void * /*data*/, const char *el, const char **attr)
 
 static void xml_end_tag(void * /*data*/, const char *el)
 {
-    // XML tag end
+    // Process the end of an XML element.
     if (strcmp(el, "node") == 0) xml_end_node();
     if (strcmp(el, "way") == 0) xml_end_way();
     if (strcmp(el, "relation") == 0) xml_end_relation();

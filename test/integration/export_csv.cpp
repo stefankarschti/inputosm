@@ -69,33 +69,33 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
         close(fd);
         if ((caddr_t)file_data != (caddr_t)(-1))
         {
-            // compute offsets
+            // Calculate the offsets.
             std::vector<size_t> offsets;
             for (size_t offset{0}; auto &s : lines)
             {
                 offsets.push_back(offset);
                 offset += s.length();
             }
-            // write threaded
+            // Copy each string to its position in the file.
             auto work = [&lines, &offsets, file_data](int index) {
                 memcpy(file_data + offsets[index], lines[index].data(), lines[index].length());
                 std::cout << ".";
                 std::cout.flush();
             };
-            // spawn workers
+            // Start the worker threads.
             size_t thread_count = offsets.size();
             std::vector<std::thread> worker_threads(thread_count);
             for (size_t index{0}; index < thread_count; index++)
             {
                 worker_threads[index] = std::thread(work, index);
             }
-            // wait for them to finish
+            // Wait for all worker threads to stop.
             for (auto &th : worker_threads)
             {
                 if (th.joinable()) th.join();
             }
             std::cout << "\n";
-            // unmap
+            // Remove the memory mapping.
             if (munmap(file_data, file_size) == -1)
             {
                 perror("munmap");
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
     static_assert(sizeof(pos) == 8);
     std::vector<std::unordered_map<int64_t, pos>> node_pos_thread(input_osm::thread_count());
 
-    // nodes
+    // Collect the node data.
     std::cout << "extracting nodes...\n";
     if (!input_osm::input_file(
             path,
@@ -167,7 +167,7 @@ int main(int argc, char **argv)
         return no_node;
     };
 
-    // ways
+    // Collect the way data.
     std::cout << "extracting ways and relations...\n";
     std::vector<std::string> lines_way_node(input_osm::thread_count());
     std::vector<std::string> lines_relations(input_osm::thread_count());

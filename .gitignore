@@ -1,8 +1,8 @@
-# artifacts
+# Build output
 build
 install
 /.cache
 
-# ide
+# IDE files
 .vscode
 *.user

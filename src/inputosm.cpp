@@ -56,7 +56,7 @@ bool input_file(const char* filename,
         return false;
     }
 
-    std::string_view filename_sv = filename; // does the strlen
+    std::string_view filename_sv = filename; // The constructor calculates the string length.
     size_t pos_of_period = filename_sv.find_last_of('.');
     std::string_view extension;
     if (pos_of_period != std::string_view::npos)

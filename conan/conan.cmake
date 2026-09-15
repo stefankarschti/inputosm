@@ -25,15 +25,15 @@
 # This file comes from: https://github.com/conan-io/cmake-conan. Please refer
 # to this repository for issues and documentation.
 
-# Its purpose is to wrap and launch Conan C/C++ Package Manager when cmake is called.
-# It will take CMake current settings (os, compiler, compiler version, architecture)
-# and translate them to conan settings for installing and retrieving dependencies.
+# This file starts the Conan C/C++ Package Manager from CMake.
+# It converts CMake settings to Conan settings to get and install dependencies.
+# These settings include the operating system, compiler, compiler version, and architecture.
 
-# It is intended to facilitate developers building projects that have conan dependencies,
-# but it is only necessary on the end-user side. It is not necessary to create conan
-# packages, in fact it shouldn't be use for that. Check the project documentation.
+# Use this file to build projects that have Conan dependencies.
+# Do not use it to create Conan packages.
+# Refer to the project documentation.
 
-# version: 0.19.0-dev
+# Version: 0.19.0-dev
 
 include(CMakeParseArguments)
 
@@ -86,9 +86,9 @@ macro(_conan_detect_build_type)
 endmacro()
 
 macro(_conan_check_system_name)
-    #handle -s os setting
+    # Process the -s os setting.
     if(CMAKE_SYSTEM_NAME AND NOT CMAKE_SYSTEM_NAME STREQUAL "Generic")
-        #use default conan os setting if CMAKE_SYSTEM_NAME is not defined
+        # Use CMAKE_SYSTEM_NAME for the Conan operating system setting.
         set(CONAN_SYSTEM_NAME ${CMAKE_SYSTEM_NAME})
         if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
             set(CONAN_SYSTEM_NAME Macos)
@@ -99,7 +99,7 @@ macro(_conan_check_system_name)
         set(CONAN_SUPPORTED_PLATFORMS Windows Linux Macos Android iOS FreeBSD WindowsStore WindowsCE watchOS tvOS FreeBSD SunOS AIX Arduino Emscripten Neutrino)
         list (FIND CONAN_SUPPORTED_PLATFORMS "${CONAN_SYSTEM_NAME}" _index)
         if (${_index} GREATER -1)
-            #check if the cmake system is a conan supported one
+            # Set the Conan operating system.
             set(_CONAN_SETTING_OS ${CONAN_SYSTEM_NAME})
         else()
             message(FATAL_ERROR "cmake system ${CONAN_SYSTEM_NAME} is not supported by conan. Use one of ${CONAN_SUPPORTED_PLATFORMS}")
@@ -133,8 +133,8 @@ macro(_conan_detect_compiler)
     endif()
 
     if (${CMAKE_${LANGUAGE}_COMPILER_ID} STREQUAL GNU OR ${CMAKE_${LANGUAGE}_COMPILER_ID} STREQUAL QCC)
-        # using GCC or QCC
-        # TODO: Handle other params
+        # GCC or QCC compiler
+        # TODO: Add code to process other parameters.
         string(REPLACE "." ";" VERSION_LIST ${CMAKE_${LANGUAGE}_COMPILER_VERSION})
         list(GET VERSION_LIST 0 MAJOR)
         list(GET VERSION_LIST 1 MINOR)
@@ -164,7 +164,7 @@ macro(_conan_detect_compiler)
             set(_CONAN_SETTING_COMPILER_LIBCXX ${_LIBCXX})
         endif ()
     elseif (${CMAKE_${LANGUAGE}_COMPILER_ID} STREQUAL AppleClang)
-        # using AppleClang
+        # AppleClang compiler
         string(REPLACE "." ";" VERSION_LIST ${CMAKE_${LANGUAGE}_COMPILER_VERSION})
         list(GET VERSION_LIST 0 MAJOR)
         list(GET VERSION_LIST 1 MINOR)
@@ -261,7 +261,7 @@ function(conan_cmake_settings result)
 
     _conan_detect_compiler(${ARGV})
 
-    # If profile is defined it is used
+    # If a profile is defined, use it.
     if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND ARGUMENTS_DEBUG_PROFILE)
         set(_APPLIED_PROFILES ${ARGUMENTS_DEBUG_PROFILE})
     elseif(CMAKE_BUILD_TYPE STREQUAL "Release" AND ARGUMENTS_RELEASE_PROFILE)
@@ -287,14 +287,14 @@ function(conan_cmake_settings result)
                                    compiler.runtime compiler.libcxx compiler.toolset)
     endif()
 
-    # remove any manually specified settings from the autodetected settings
+    # Remove automatically detected settings that the user specified manually.
     foreach(ARG ${ARGUMENTS_SETTINGS})
         string(REGEX MATCH "[^=]*" MANUAL_SETTING "${ARG}")
         message(STATUS "Conan: ${MANUAL_SETTING} was added as an argument. Not using the autodetected one.")
         list(REMOVE_ITEM ARGUMENTS_PROFILE_AUTO "${MANUAL_SETTING}")
     endforeach()
 
-    # Automatic from CMake
+    # Get the settings from CMake.
     foreach(ARG ${ARGUMENTS_PROFILE_AUTO})
         string(TOUPPER ${ARG} _arg_name)
         string(REPLACE "." "_" _arg_name ${_arg_name})
@@ -314,11 +314,11 @@ endfunction()
 
 
 function(conan_cmake_detect_unix_libcxx result)
-    # Take into account any -stdlib in compile options
+    # Get the compiler options, such as -stdlib.
     get_directory_property(compile_options DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMPILE_OPTIONS)
     string(GENEX_STRIP "${compile_options}" compile_options)
 
-    # Take into account any _GLIBCXX_USE_CXX11_ABI in compile definitions
+    # Get the compiler definitions, such as _GLIBCXX_USE_CXX11_ABI.
     get_directory_property(defines DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMPILE_DEFINITIONS)
     string(GENEX_STRIP "${defines}" defines)
 
@@ -332,17 +332,17 @@ function(conan_cmake_detect_unix_libcxx result)
         endif()
     endforeach()
 
-    # add additional compiler options ala cmRulePlaceholderExpander::ExpandRuleVariable
+    # Add compiler options as in cmRulePlaceholderExpander::ExpandRuleVariable.
     set(EXPAND_CXX_COMPILER ${CMAKE_CXX_COMPILER})
     if(CMAKE_CXX_COMPILER_ARG1)
-        # CMake splits CXX="foo bar baz" into CMAKE_CXX_COMPILER="foo", CMAKE_CXX_COMPILER_ARG1="bar baz"
-        # without this, ccache, winegcc, or other wrappers might lose all their arguments
+        # CMake converts CXX="foo bar baz" to CMAKE_CXX_COMPILER="foo" and CMAKE_CXX_COMPILER_ARG1="bar baz".
+        # Keep the arguments for compiler wrappers, such as ccache and winegcc.
         separate_arguments(SPLIT_CXX_COMPILER_ARG1 NATIVE_COMMAND ${CMAKE_CXX_COMPILER_ARG1})
         list(APPEND EXPAND_CXX_COMPILER ${SPLIT_CXX_COMPILER_ARG1})
     endif()
 
     if(CMAKE_CXX_COMPILE_OPTIONS_TARGET AND CMAKE_CXX_COMPILER_TARGET)
-        # without --target= we may be calling the wrong underlying GCC
+        # Use --target= to select the correct GCC compiler.
         list(APPEND EXPAND_CXX_COMPILER "${CMAKE_CXX_COMPILE_OPTIONS_TARGET}${CMAKE_CXX_COMPILER_TARGET}")
     endif()
 
@@ -351,7 +351,7 @@ function(conan_cmake_detect_unix_libcxx result)
     endif()
 
     if(CMAKE_CXX_COMPILE_OPTIONS_SYSROOT)
-        # without --sysroot= we may find the wrong #include <string>
+        # Use --sysroot= to find the correct header for #include <string>.
         if(CMAKE_SYSROOT_COMPILE)
             list(APPEND EXPAND_CXX_COMPILER "${CMAKE_CXX_COMPILE_OPTIONS_SYSROOT}${CMAKE_SYSROOT_COMPILE}")
         elseif(CMAKE_SYSROOT)
@@ -372,7 +372,7 @@ function(conan_cmake_detect_unix_libcxx result)
     )
 
     if(string_defines MATCHES "#define __GLIBCXX__")
-        # Allow -D_GLIBCXX_USE_CXX11_ABI=ON/OFF as argument to cmake
+        # Accept -D_GLIBCXX_USE_CXX11_ABI=ON/OFF as a CMake argument.
         if(DEFINED _GLIBCXX_USE_CXX11_ABI)
             if(_GLIBCXX_USE_CXX11_ABI)
                 set(${result} libstdc++11 PARENT_SCOPE)
@@ -386,9 +386,9 @@ function(conan_cmake_detect_unix_libcxx result)
         if(string_defines MATCHES "#define _GLIBCXX_USE_CXX11_ABI 1\n")
             set(${result} libstdc++11 PARENT_SCOPE)
         else()
-            # Either the compiler is missing the define because it is old, and so
-            # it can't use the new abi, or the compiler was configured to use the
-            # old abi by the user or distro (e.g. devtoolset on RHEL/CentOS)
+            # A compiler without the new application binary interface (ABI) definition uses libstdc++.
+            # The user or operating system distribution can also configure the compiler to use the previous ABI.
+            # The RHEL/CentOS devtoolset is an example.
             set(${result} libstdc++ PARENT_SCOPE)
         endif()
     else()
@@ -463,11 +463,12 @@ macro(conan_parse_arguments)
 endmacro()
 
 function(old_conan_cmake_install)
-    # Calls "conan install"
-    # Argument BUILD is equivalent to --build={missing, PkgName,...} or
-    # --build when argument is 'BUILD all' (which builds all packages from source)
-    # Argument CONAN_COMMAND, to specify the conan path, e.g. in case of running from source
-    # cmake does not identify conan as command, even if it is +x and it is in the path
+    # Start "conan install".
+    # BUILD sets --build={missing, PkgName,...}.
+    # 'BUILD all' sets --build to build all packages from source.
+    # Use CONAN_COMMAND to specify the Conan path if CMake cannot find the command.
+    # This can occur with a Conan source installation.
+    # The file can be executable and in PATH.
     conan_parse_arguments(${ARGV})
 
     if(CONAN_CMAKE_MULTI)
@@ -765,7 +766,7 @@ function(conan_cmake_setup_conanfile)
   conan_parse_arguments(${ARGV})
   if(ARGUMENTS_CONANFILE)
     get_filename_component(_CONANFILE_NAME ${ARGUMENTS_CONANFILE} NAME)
-    # configure_file will make sure cmake re-runs when conanfile is updated
+    # configure_file starts CMake again when the Conan file changes.
     configure_file(${ARGUMENTS_CONANFILE} ${CMAKE_CURRENT_BINARY_DIR}/${_CONANFILE_NAME}.junk COPYONLY)
     file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/${_CONANFILE_NAME}.junk)
   else()
@@ -777,9 +778,8 @@ function(conan_cmake_configure)
     conan_cmake_generate_conanfile(OFF ${ARGV})
 endfunction()
 
-# Generate, writing in disk a conanfile.txt with the requires, options, and imports
-# specified as arguments
-# This will be considered as temporary file, generated in CMAKE_CURRENT_BINARY_DIR)
+# Write conanfile.txt with the requires, options, and imports from the arguments.
+# This is a temporary file in CMAKE_CURRENT_BINARY_DIR.
 function(conan_cmake_generate_conanfile DEFAULT_GENERATOR)
 
     conan_parse_arguments(${ARGV})
@@ -841,8 +841,8 @@ macro(conan_load_buildinfo)
     else()
         set(_CONANBUILDINFOFOLDER ${CMAKE_CURRENT_BINARY_DIR})
     endif()
-    # Checks for the existence of conanbuildinfo.cmake, and loads it
-    # important that it is macro, so variables defined at parent scope
+    # If conanbuildinfo.cmake exists, load it.
+    # Use a macro to define the variables in the scope of the caller.
     if(EXISTS "${_CONANBUILDINFOFOLDER}/${_CONANBUILDINFO}")
       message(STATUS "Conan: Loading ${_CONANBUILDINFO}")
       include(${_CONANBUILDINFOFOLDER}/${_CONANBUILDINFO})
@@ -906,9 +906,9 @@ macro(conan_cmake_run)
 endmacro()
 
 macro(conan_check)
-    # Checks conan availability in PATH
-    # Arguments REQUIRED, DETECT_QUIET and VERSION are optional
-    # Example usage:
+    # Find the Conan executable in PATH.
+    # The REQUIRED, DETECT_QUIET, and VERSION arguments are optional.
+    # Example:
     #    conan_check(VERSION 1.0.0 REQUIRED)
     set(options REQUIRED DETECT_QUIET)
     set(oneValueArgs VERSION)
@@ -950,9 +950,9 @@ macro(conan_check)
 endmacro()
 
 function(conan_add_remote)
-    # Adds a remote
-    # Arguments URL and NAME are required, INDEX, COMMAND and VERIFY_SSL are optional
-    # Example usage:
+    # Add a remote repository.
+    # The URL and NAME arguments are required. INDEX, COMMAND, and VERIFY_SSL are optional.
+    # Example:
     #    conan_add_remote(NAME bincrafters INDEX 1
     #       URL https://api.bintray.com/conan/bincrafters/public-conan
     #       VERIFY_SSL True)
@@ -980,9 +980,9 @@ function(conan_add_remote)
 endfunction()
 
 macro(conan_config_install)
-    # install a full configuration from a local or remote zip file
-    # Argument ITEM is required, arguments TYPE, SOURCE, TARGET and VERIFY_SSL are optional
-    # Example usage:
+    # Install a full configuration from a local or remote ZIP file.
+    # The ITEM argument is required. TYPE, SOURCE, TARGET, and VERIFY_SSL are optional.
+    # Example:
     #    conan_config_install(ITEM https://github.com/conan-io/cmake-conan.git
     #       TYPE git SOURCE source-folder TARGET target-folder VERIFY_SSL false)
     set(oneValueArgs ITEM TYPE SOURCE TARGET VERIFY_SSL)
@@ -1004,7 +1004,7 @@ macro(conan_config_install)
     endif()
 
     if(DEFINED CONAN_ARGS)
-	# Convert ; seperated multi arg list into space seperated string
+	# Convert the argument list to a string with spaces as separators.
 	string(REPLACE ";" " " l_CONAN_ARGS "${CONAN_ARGS}")
 	set(CONAN_ARGS_ARGS "--args=${l_CONAN_ARGS}")
     endif()

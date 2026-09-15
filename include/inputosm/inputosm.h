@@ -54,8 +54,8 @@ static_assert(sizeof(way_t) <= 64);
 struct relation_member_t
 {
     /**
-     * @brief Relation type
-     * @details NODE = 0; WAY = 1; RELATION = 2;
+     * @brief Type of the relation member.
+     * @details A node has type 0. A way has type 1. A relation has type 2.
      */
     uint8_t type = 0;
     int64_t id = 0;
@@ -110,22 +110,22 @@ enum log_level_t : uint8_t
 };
 
 /**
- * @brief Set log level
- * @note not thread safe
+ * @brief Set the log level.
+ * @note This function is not thread-safe.
  */
 void set_log_level(log_level_t) noexcept;
 
 /**
- * @brief Log callback used for reporting back to the user
- * @note the message is a \0 terminated c-string
+ * @brief Callback that sends log messages to the user.
+ * @note The message is a C string that ends with \0.
  */
 using log_callback_t = void (*)(log_level_t level, const char* message);
 
 /**
- * @brief Set the log callback
- * @param log_callback new log callback
- * @note the log callback will be called from multiple threads, it should be thread safe
- * @return true if set was OK
+ * @brief Set the log callback.
+ * @param log_callback The new log callback.
+ * @note Multiple threads can call the callback at the same time. The callback must be thread-safe.
+ * @return true if the function sets the callback. A null callback causes the function to return false.
  */
 bool set_log_callback(log_callback_t log_callback) noexcept;
 
