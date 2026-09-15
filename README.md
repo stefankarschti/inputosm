@@ -13,7 +13,7 @@ The XML reader uses the thread that calls `input_file()`.
 1. Features
 2. Start
 3. Build and install
-4. Use Conan
+4. Conan usage
 5. CMake options
 6. API description
 7. Examples
@@ -150,7 +150,7 @@ To get the compiler and linker options with pkg-config, use this command:
 pkg-config --cflags --libs inputosm
 ```
 
-## 4. Use Conan
+## 4. Conan usages
 
 Conan can get the Expat and Zlib dependencies.
 
