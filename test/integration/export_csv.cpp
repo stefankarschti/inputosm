@@ -129,7 +129,7 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             true,
-            [&lines, &node_pos_thread](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool {
+            [&lines, &node_pos_thread](std::span<const input_osm::node_t> node_list) noexcept -> bool {
                 std::stringstream ss;
                 for (auto &n : node_list)
                 {
@@ -176,7 +176,7 @@ int main(int argc, char **argv)
             path,
             true,
             nullptr,
-            [&lines, &node_pos, &lines_way_node](input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool {
+            [&lines, &node_pos, &lines_way_node](std::span<const input_osm::way_t> way_list) noexcept -> bool {
                 std::stringstream ss;
                 std::stringstream ss_way_node;
                 for (auto &way : way_list)
@@ -211,7 +211,7 @@ int main(int argc, char **argv)
                 return true;
             },
             [&lines_relations,
-             &lines_relation_members](input_osm::span_t<input_osm::relation_t> relation_list) noexcept -> bool {
+             &lines_relation_members](std::span<const input_osm::relation_t> relation_list) noexcept -> bool {
                 std::stringstream ss;
                 std::stringstream ss_members;
                 for (auto &relation : relation_list)

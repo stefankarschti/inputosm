@@ -13,7 +13,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-bool open_and_map(const char *filename, caddr_t &file_data, uint64_t &file_size)
+bool open_and_map(const char* filename, caddr_t& file_data, uint64_t& file_size)
 {
     struct stat mmapstat;
     if (::stat(filename, &mmapstat) == -1)
@@ -52,10 +52,10 @@ bool unmap_and_close(caddr_t file_data, uint64_t file_size)
     return result != -1;
 }
 
-bool close_files(std::vector<int> &files)
+bool close_files(std::vector<int>& files)
 {
     bool result = true;
-    for (auto &fd : files)
+    for (auto& fd : files)
     {
         if (-1 == ::close(fd))
         {
@@ -70,7 +70,7 @@ bool close_files(std::vector<int> &files)
     return result;
 }
 
-bool concatenate_and_remove_files(const char *root_filename, size_t file_count)
+bool concatenate_and_remove_files(const char* root_filename, size_t file_count)
 {
     int foutput = ::open(root_filename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (foutput == -1)
@@ -101,14 +101,14 @@ bool concatenate_and_remove_files(const char *root_filename, size_t file_count)
     return result;
 }
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
     if (argc < 2)
     {
         std::cerr << "Usage" << argv[0] << "<path-to-pbf> [read-metadata]\n";
         return EXIT_FAILURE;
     }
-    const char *path = argv[1];
+    const char* path = argv[1];
     std::cout << "importing " << path << "\n";
     input_osm::set_max_thread_count();
 
@@ -130,10 +130,10 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             true,
-            [&node_count, &node_files](input_osm::span_t<input_osm::node_t> node_list) -> bool {
+            [&node_count, &node_files](std::span<const input_osm::node_t> node_list) -> bool {
                 node_count[input_osm::thread_index] += node_list.size();
                 int fd = node_files[input_osm::thread_index];
-                for (auto &n : node_list)
+                for (auto& n : node_list)
                 {
                     ::write(fd, &n.id, sizeof(int64_t));
                     int32_t lat{static_cast<int32_t>(n.raw_latitude)};
@@ -142,18 +142,20 @@ int main(int argc, char **argv)
                     ::write(fd, &lon, sizeof(int32_t));
                     int16_t size = n.tags.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &tag : n.tags)
+                    for (auto& tag : n.tags)
                     {
-                        ::write(fd, tag.key, strlen(tag.key) + 1);
-                        ::write(fd, tag.value, strlen(tag.value) + 1);
+                        if (!tag.key.empty()) ::write(fd, tag.key.data(), tag.key.size());
+                        ::write(fd, "", 1);
+                        if (!tag.value.empty()) ::write(fd, tag.value.data(), tag.value.size());
+                        ::write(fd, "", 1);
                     }
                 }
                 return true;
             },
-            [&way_count, &way_files](input_osm::span_t<input_osm::way_t> way_list) -> bool {
+            [&way_count, &way_files](std::span<const input_osm::way_t> way_list) -> bool {
                 way_count[input_osm::thread_index] += way_list.size();
                 int fd = way_files[input_osm::thread_index];
-                for (auto &w : way_list)
+                for (auto& w : way_list)
                 {
                     ::write(fd, &w.id, sizeof(int64_t));
                     int16_t size = w.node_refs.size();
@@ -161,34 +163,39 @@ int main(int argc, char **argv)
                     ::write(fd, w.node_refs.data(), w.node_refs.size() * sizeof(int64_t));
                     size = w.tags.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &tag : w.tags)
+                    for (auto& tag : w.tags)
                     {
-                        ::write(fd, tag.key, strlen(tag.key) + 1);
-                        ::write(fd, tag.value, strlen(tag.value) + 1);
+                        if (!tag.key.empty()) ::write(fd, tag.key.data(), tag.key.size());
+                        ::write(fd, "", 1);
+                        if (!tag.value.empty()) ::write(fd, tag.value.data(), tag.value.size());
+                        ::write(fd, "", 1);
                     }
                 }
                 return true;
             },
-            [&relation_count, &relation_files](input_osm::span_t<input_osm::relation_t> relation_list) -> bool {
+            [&relation_count, &relation_files](std::span<const input_osm::relation_t> relation_list) -> bool {
                 relation_count[input_osm::thread_index] += relation_list.size();
                 int fd = relation_files[input_osm::thread_index];
-                for (auto &r : relation_list)
+                for (auto& r : relation_list)
                 {
                     ::write(fd, &r.id, sizeof(int64_t));
                     int16_t size = r.members.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &m : r.members)
+                    for (auto& m : r.members)
                     {
                         ::write(fd, &m.id, sizeof(int64_t));
-                        ::write(fd, m.role, strlen(m.role) + 1);
+                        if (!m.role.empty()) ::write(fd, m.role.data(), m.role.size());
+                        ::write(fd, "", 1);
                         ::write(fd, &m.type, sizeof(int8_t));
                     }
                     size = r.tags.size();
                     ::write(fd, &size, sizeof(int16_t));
-                    for (auto &tag : r.tags)
+                    for (auto& tag : r.tags)
                     {
-                        ::write(fd, tag.key, strlen(tag.key) + 1);
-                        ::write(fd, tag.value, strlen(tag.value) + 1);
+                        if (!tag.key.empty()) ::write(fd, tag.key.data(), tag.key.size());
+                        ::write(fd, "", 1);
+                        if (!tag.value.empty()) ::write(fd, tag.value.data(), tag.value.size());
+                        ::write(fd, "", 1);
                     }
                 }
                 return true;

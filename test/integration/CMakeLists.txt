@@ -23,3 +23,6 @@ target_link_libraries(export_db PRIVATE Threads::Threads inputosm::inputosm)
 
 add_executable(custom_log custom_log.cpp)
 target_link_libraries(custom_log PRIVATE Threads::Threads inputosm::inputosm)
+
+add_executable(count_blocks count_blocks.cpp)
+target_link_libraries(count_blocks PRIVATE inputosm::inputosm)

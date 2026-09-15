@@ -1,6 +1,6 @@
 # PBF block callback API proposal
 
-Status: Proposed.
+Status: Implemented in version 0.2.0.
 
 ## 1. Purpose
 
@@ -13,13 +13,13 @@ Both input APIs use the same entity structures, string views, and standard spans
 This change requires source changes and a rebuild for existing consumers.
 
 This document specifies the API, its behavior, the internal design, and the implementation plan.
-The declarations below describe proposed changes.
+The declarations below describe the implemented API.
 
-## 2. Current implementation
+## 2. Implementation before this change
 
 The review used repository revision `3e05a74`.
 
-| Location | Current behavior | Effect on this proposal |
+| Location | Previous behavior | Required change |
 | --- | --- | --- |
 | [inputosm.h](../include/inputosm/inputosm.h), `input_file()` | Accepts three entity handlers. | Add a separate function with one block handler. |
 | [inputosm.cpp](../src/inputosm.cpp), `input_file()` | Stores handlers and metadata configuration in global variables. | Keep new callback state in the read operation. |
@@ -27,13 +27,13 @@ The review used repository revision `3e05a74`.
 | `handle_blob()` | Reads raw data or decompresses Zlib data. | Retain these two input forms. |
 | `string_table_t` | Copies string bytes into `st_buffer` and adds null characters. | Remove the type. Store `std::vector<std::string_view>` directly. |
 | `tag_t` and `relation_member_t` | Use C-string pointers for tag fields and relation roles. | Change these fields to `std::string_view` for both APIs. |
-| [span.h](../include/inputosm/span.h), `span_t` | Supplies a custom span with read-only element access. | Replace it with `std::span<const T>` at public interfaces. |
+| Removed `include/inputosm/span.h`, `span_t` | Supplies a custom span with read-only element access. | Replace it with `std::span<const T>` at public interfaces. |
 | `read_primitve_block()` | Reads the string table, primitive groups, and block parameters. | Collect all primitive groups before the block callback. |
 | `read_dense_nodes()` and `read_primitive_group()` | Call entity handlers before the complete block is available. | Separate entity decoding from callback selection. |
 | `read_primitive_group()` | Ignores ordinary `Node` messages. | Add ordinary node decoding for complete block results. |
 | `input_mem()` and `work()` | Do not return worker failures to the caller. | Return `false` for any stop request or worker failure. |
 
-The current vectors belong to individual threads.
+In that revision, the vectors belong to individual threads.
 The decoder clears node vectors for each dense node message.
 It clears way and relation vectors for each primitive group.
 A collection of the existing spans would therefore contain invalid references.
@@ -53,7 +53,7 @@ See the [OSM data schema](https://github.com/openstreetmap/OSM-binary/blob/maste
 The callback receives decoded entities.
 It does not receive compressed bytes, Protocol Buffers messages, or one callback for each primitive group.
 
-## 4. Proposed public API
+## 4. Public API
 
 Update the shared entity declarations in `include/inputosm/inputosm.h`.
 Add the block API declarations to the same header.
@@ -504,6 +504,7 @@ Raw and Zlib data are supported; other compression types produce `false` for kno
 
 Before reading data, check lengths against the remaining input size.
 Reject truncated fields, invalid varints, invalid string indexes, and inconsistent entity arrays.
+Skip unknown Protocol Buffers groups with a maximum nesting depth of 64.
 Check delta arithmetic and conversions for overflow.
 Reject unsupported `ChangeSet` entities instead of silently omitting them.
 Ignore optional entity fields that the current public structures do not expose.
@@ -538,6 +539,7 @@ The new mode adds one `std::function` call for each data block.
 It can use more memory than the existing entity mode when blocks contain many groups.
 Measure this cost before any change to vector capacity retention.
 No new runtime dependency is necessary.
+Zlib version 1.2.9 is the minimum for compressed input length validation.
 
 String views remove the secondary string byte buffer from both PBF delivery modes.
 View records still require memory for both a pointer and a length.
@@ -636,7 +638,8 @@ Rebuild the library and all dependent applications together.
 Its handler parameter types become `std::span<const node_t>`, `std::span<const way_t>`, and `std::span<const relation_t>`.
 Applications still select entity callbacks or the additional block callback API.
 The new cancellation contract applies to `input_pbf_blocks()`.
-Changes to the existing cancellation behavior require a separate change and tests.
+The shared PBF executor also corrects lost stop and failure results in `input_file()`.
+The PBF tests verify this correction for both APIs.
 
 ### 7.1 Required consumer changes
 

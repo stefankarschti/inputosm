@@ -13,12 +13,12 @@
 
 namespace
 {
-std::map<std::string, std::string> collect_tags(input_osm::span_t<input_osm::tag_t> tags)
+std::map<std::string, std::string> collect_tags(std::span<const input_osm::tag_t> tags)
 {
     std::map<std::string, std::string> result;
     for (const auto& tag : tags)
     {
-        result.emplace(tag.key ? tag.key : "", tag.value ? tag.value : "");
+        result.emplace(tag.key, tag.value);
     }
     return result;
 }
@@ -40,7 +40,7 @@ int main()
     const bool parse_ok = input_osm::input_file(
         data_path.string().c_str(),
         true,
-        [&](input_osm::span_t<input_osm::node_t> batch) {
+        [&](std::span<const input_osm::node_t> batch) {
             if (batch.size() != 1)
             {
                 std::cerr << "OSC node batch expected 1 entry, got " << batch.size() << '\n';
@@ -88,7 +88,7 @@ int main()
             node_seen = true;
             return true;
         },
-        [&](input_osm::span_t<input_osm::way_t> batch) {
+        [&](std::span<const input_osm::way_t> batch) {
             if (batch.size() != 1)
             {
                 std::cerr << "OSC way batch expected 1 entry, got " << batch.size() << '\n';
@@ -137,7 +137,7 @@ int main()
             way_seen = true;
             return true;
         },
-        [&](input_osm::span_t<input_osm::relation_t> batch) {
+        [&](std::span<const input_osm::relation_t> batch) {
             if (batch.size() != 1)
             {
                 std::cerr << "OSC relation batch expected 1 entry, got " << batch.size() << '\n';
@@ -170,14 +170,14 @@ int main()
                 return false;
             }
             const auto& node_member = relation.members[0];
-            if (node_member.type != 0 || node_member.id != 100 || !node_member.role ||
+            if (node_member.type != 0 || node_member.id != 100 ||
                 std::string(node_member.role) != "stop")
             {
                 std::cerr << "Unexpected first relation member" << '\n';
                 return false;
             }
             const auto& way_member = relation.members[1];
-            if (way_member.type != 1 || way_member.id != 200 || !way_member.role ||
+            if (way_member.type != 1 || way_member.id != 200 ||
                 std::string(way_member.role) != "route")
             {
                 std::cerr << "Unexpected second relation member" << '\n';

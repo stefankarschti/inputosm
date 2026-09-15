@@ -39,13 +39,12 @@ int main(int argc, char **argv)
     input_osm::set_log_level(input_osm::LOG_LEVEL_TRACE);
     input_osm::set_log_callback(logWithTime);
 
-    using input_osm::span_t;
     if (!input_osm::input_file(
             argv[1],
             true,
-            [](span_t<input_osm::node_t>) { return true; },
-            [](span_t<input_osm::way_t>) { return true; },
-            [](span_t<input_osm::relation_t>) { return true; }))
+            [](std::span<const input_osm::node_t>) { return true; },
+            [](std::span<const input_osm::way_t>) { return true; },
+            [](std::span<const input_osm::relation_t>) { return true; }))
     {
         return EXIT_FAILURE;
     }

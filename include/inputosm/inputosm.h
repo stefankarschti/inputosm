@@ -14,7 +14,9 @@
 #ifndef INPUTOSM_H
 #define INPUTOSM_H
 
-#include "span.h"
+#include <span>
+#include <string_view>
+#include <cstddef>
 
 #include <cstdint>
 #include <functional>
@@ -24,8 +26,8 @@ namespace input_osm
 
 struct tag_t
 {
-    const char* key = nullptr;
-    const char* value = nullptr;
+    std::string_view key;
+    std::string_view value;
 };
 
 struct node_t
@@ -33,7 +35,7 @@ struct node_t
     int64_t id = 0;
     int64_t raw_latitude = 0;
     int64_t raw_longitude = 0;
-    span_t<tag_t> tags;
+    std::span<const tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
@@ -43,8 +45,8 @@ static_assert(sizeof(node_t) <= 64);
 struct way_t
 {
     int64_t id = 0;
-    span_t<int64_t> node_refs;
-    span_t<tag_t> tags;
+    std::span<const int64_t> node_refs;
+    std::span<const tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
@@ -59,19 +61,45 @@ struct relation_member_t
      */
     uint8_t type = 0;
     int64_t id = 0;
-    const char* role = nullptr;
+    std::string_view role;
 };
 
 struct relation_t
 {
     int64_t id = 0;
-    span_t<relation_member_t> members;
-    span_t<tag_t> tags;
+    std::span<const relation_member_t> members;
+    std::span<const tag_t> tags;
     int32_t version = 0;
     int32_t timestamp = 0;
     int32_t changeset = 0;
 };
 static_assert(sizeof(relation_t) <= 64);
+
+struct pbf_block_t
+{
+    size_t index = 0;
+    uint64_t file_offset = 0;
+
+    std::span<const std::string_view> string_table;
+    std::span<const node_t> nodes;
+    std::span<const way_t> ways;
+    std::span<const relation_t> relations;
+
+    int32_t granularity = 100;
+    int64_t lat_offset = 0;
+    int64_t lon_offset = 0;
+    int32_t date_granularity = 1000;
+};
+
+using pbf_block_handler_t = std::function<bool(const pbf_block_t&)>;
+
+/**
+ * @brief Read complete PBF blocks.
+ * @note All views remain valid only during the callback.
+ * @note With multiple threads, callbacks can run concurrently and out of file order.
+ * @return true on completion. A stop request or error produces false.
+ */
+bool input_pbf_blocks(const char* filename, bool decode_metadata, pbf_block_handler_t block_handler) noexcept;
 
 enum class file_type_t
 {
@@ -91,9 +119,9 @@ void set_verbose(bool value);
 
 bool input_file(const char* filename,
                 bool decode_metadata,
-                std::function<bool(span_t<node_t>)> node_handler,
-                std::function<bool(span_t<way_t>)> way_handler,
-                std::function<bool(span_t<relation_t>)> relation_handler) noexcept;
+                std::function<bool(std::span<const node_t>)> node_handler,
+                std::function<bool(std::span<const way_t>)> way_handler,
+                std::function<bool(std::span<const relation_t>)> relation_handler) noexcept;
 
 void set_thread_count(size_t);
 
