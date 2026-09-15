@@ -112,7 +112,7 @@ int main(int argc, char **argv)
     std::cout << "importing " << path << "\n";
     input_osm::set_max_thread_count();
 
-    // node, way and relation files
+    // File descriptors for nodes, ways, and relations.
     std::vector<int> node_files(input_osm::thread_count(), -1);
     std::vector<int> way_files(input_osm::thread_count(), -1);
     std::vector<int> relation_files(input_osm::thread_count(), -1);
@@ -198,7 +198,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    // concatenate files
+    // Write the data from each thread to the output files.
     close_files(node_files);
     concatenate_and_remove_files("node", node_files.size());
     close_files(way_files);

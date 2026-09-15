@@ -9,9 +9,9 @@ constexpr const char* kError = "err";
 constexpr const char* kInfo = "inf";
 constexpr const char* kTrace = "trc";
 
-// basic printf logger callback, can be changed by the user
-// NOTE: the function *should* be thread safe, interlaced output is ok-ish, but make sure
-//      there's no other shared data
+// This default log callback uses printf. The user can replace it.
+// The callback must be thread-safe. Output from different threads can be mixed.
+// Do not add other shared data without synchronization.
 static input_osm::log_callback_t g_default_log_callback = [](input_osm::log_level_t lvl, const char* message) {
     switch (lvl)
     {

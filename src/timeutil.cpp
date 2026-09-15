@@ -68,11 +68,11 @@ std::string duration_to_str(int64_t nano)
     {
         snprintf(buffer, 256, "%.3f μs", nano / 1000.0);
     }
-    else if (nano < 1000000000l) // < 1s
+    else if (nano < 1000000000l) // Less than 1 second.
     {
         snprintf(buffer, 256, "%.3f ms", nano / 1000000.0);
     }
-    else if (nano < 60000000000l) // < 60s
+    else if (nano < 60000000000l) // Less than 60 seconds.
     {
         snprintf(buffer, 256, "%.3f s", nano / 1000000000.0);
     }

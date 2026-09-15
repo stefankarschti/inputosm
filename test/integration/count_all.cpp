@@ -38,10 +38,10 @@ int main(int argc, char** argv)
 
     std::cout << "running on " << actual_thread_count << " threads\n";
 
-    // do a single allocation
+    // Allocate memory for all counters in one operation.
     std::vector<input_osm::Counter<uint64_t>> all_counters(3 * actual_thread_count);
 
-    // use spans to split counters for each entity
+    // Use a different span for each entity type.
     std::span<input_osm::Counter<uint64_t>> node_count(all_counters.data(), actual_thread_count);
     std::span<input_osm::Counter<uint64_t>> way_count(all_counters.data() + actual_thread_count, actual_thread_count);
     std::span<input_osm::Counter<uint64_t>> relation_count(all_counters.data() + 2 * actual_thread_count,

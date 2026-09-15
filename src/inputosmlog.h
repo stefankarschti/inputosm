@@ -25,10 +25,10 @@ extern log_level_t g_log_level;
 extern log_callback_t g_log_callback;
 
 /**
- * @brief Log a message with level and printf style formatting
- * @param level log level
- * @param fmt printf style formatting string (not checked!)
- * @param va_list of args for printf
+ * @brief Write a log message with the specified level and printf format.
+ * @param level The log level.
+ * @param fmt The printf format string. The function does not validate this string.
+ * @param ... The arguments for the printf format string.
  */
 void log(log_level_t level, const char* fmt, ...) noexcept;
 

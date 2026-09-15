@@ -34,7 +34,7 @@ int main(int argc, char **argv)
     input_osm::set_max_thread_count();
     std::cout << "running on " << input_osm::thread_count() << " threads\n";
 
-    // single allocation
+    // Allocate memory for all counters in one operation.
     constexpr unsigned total_lat_degree_values = 91;
     std::vector<input_osm::u64_64B> node_count_by_lat(total_lat_degree_values * input_osm::thread_count(), 0);
 
@@ -56,7 +56,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    // aggregate
+    // Add the counts from all threads.
     std::vector<int64_t> lats(total_lat_degree_values, 0);
     int64_t sum = 0;
 

@@ -6,9 +6,9 @@
 namespace input_osm
 {
 
-// since each thread works on one uint64, let's make sure these are not false-shared
+// Each thread uses one counter. Use a different cache line for each counter to prevent false sharing.
 template <typename T>
-// T should be an integer type (like uint64_t, int32_t, etc...)
+// T must be an integer type, such as uint64_t or int32_t.
 struct Counter
 {
     static_assert(sizeof(T) < 64);
@@ -20,13 +20,13 @@ struct Counter
     {
     }
 
-    // to simplify using the algorithms with this type
+    // These conversions let algorithms use the counter value.
     operator const T&() const { return count; }
 
     operator T&() { return count; }
 
 private:
-    // one cacheline worth, actual counter
+    // Align the counter value to a 64-byte cache line.
     alignas(64) T count = 0;
 };
 
