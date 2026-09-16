@@ -12,6 +12,7 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
+#include <fmt/format.h>
 #include "inputosmlog.h"
 #include "timeutil.h"
 
@@ -20,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 #include <expat.h>
 #include <string>
 #include <vector>
@@ -263,7 +265,7 @@ bool input_xml(const char* filename)
     FILE* f = fopen(filename, "rb");
     if (!f)
     {
-        perror(filename);
+        fmt::print(stderr, "{}: {}\n", filename, std::strerror(errno));
         return false;
     }
     XML_Parser parser = XML_ParserCreate(nullptr);
@@ -292,7 +294,7 @@ bool input_xml(const char* filename)
         {
             result = false;
             xml_buff[len] = 0;
-            IOSM_ERROR("Error parsing xml! Buffer: %s\n", xml_buff);
+            IOSM_ERROR("Error parsing xml! Buffer: {}\n", xml_buff);
             break;
         }
     }

@@ -32,7 +32,7 @@ The XML reader uses the thread that calls `input_file()`.
 - Use different callbacks for nodes, ways, and relations.
 - Select metadata, such as versions, timestamps, and changesets, for PBF decoding.
 - Set a callback for log messages.
-- Use Expat and Zlib as the library dependencies.
+- Use Expat, Zlib, and fmt as the library dependencies.
 - Use node, way, and relation structures that each occupy a maximum of 64 bytes.
 
 ## 2. Start
@@ -43,10 +43,11 @@ Section 7.1 shows counters for multiple threads.
 ```cpp
 #include <inputosm/inputosm.h>
 #include <cstdint>
-#include <iostream>
+#include <fmt/format.h>
+#include <cstdio>
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::cerr << "Usage: demo <file.osm.pbf> [meta]\n"; return 1; }
+    if (argc < 2) { fmt::print(stderr, "Usage: demo <file.osm.pbf> [meta]\n"); return 1; }
     const char* file = argv[1];
     const bool read_meta = (argc >= 3);
     input_osm::set_thread_count(1); // Use one thread for these shared counters.
@@ -61,8 +62,11 @@ int main(int argc, char** argv) {
         [&rel_total](std::span<const input_osm::relation_t> rels){ rel_total += rels.size(); return true; }
     );
 
-    if(!ok) { std::cerr << "Parse failed\n"; return 2; }
-    std::cout << "nodes=" << node_total << " ways=" << way_total << " relations=" << rel_total << "\n";
+    if(!ok) { fmt::print(stderr, "Parse failed\n"); return 2; }
+    fmt::print("nodes={} ways={} relations={}\n",
+               fmt::group_digits(node_total),
+               fmt::group_digits(way_total),
+               fmt::group_digits(rel_total));
 }
 ```
 
@@ -99,6 +103,11 @@ The supplied `count_all` example uses multiple threads and a different counter f
 - Expat and Zlib version 1.2.9 or a subsequent version
 - clang-tidy, unless `ENABLE_CLANG_TIDY` is `OFF`
 
+CMake downloads fmt 12.2.0 with `FetchContent` and checks the archive SHA256 checksum.
+The build uses the compiled `fmt::fmt` target.
+The first configuration requires network access.
+For an offline build, set `FETCHCONTENT_SOURCE_DIR_FMT` to a local fmt 12.2.0 source directory.
+
 ### Build the library
 
 1. Configure a Release build.
@@ -120,6 +129,7 @@ The supplied `count_all` example uses multiple threads and a different counter f
    ```
 
 The package contains headers, the library, CMake package files, and a pkg-config file.
+The installation also includes fmt and its package files.
 
 ### Build with Ninja
 
@@ -144,15 +154,20 @@ find_package(inputosm REQUIRED)
 target_link_libraries(mytool PRIVATE inputosm::inputosm)
 ```
 
+If your program calls fmt directly, also link its target to `fmt::fmt`.
+
 To get the compiler and linker options with pkg-config, use this command:
 
 ```bash
 pkg-config --cflags --libs inputosm
 ```
 
+For static linking, use `pkg-config --cflags --libs --static inputosm`.
+
 ## 4. Conan usages
 
 Conan can get the Expat and Zlib dependencies.
+CMake gets fmt through `FetchContent` in this build also.
 
 1. Configure the project through the Conan directory.
 
@@ -236,7 +251,7 @@ const bool ok = input_osm::input_pbf_blocks(
         for (const auto& way : block.ways)
             for (const auto& tag : way.tags)
                 if (tag.key == "route" && tag.value == "ferry")
-                    std::cout << way.id << '\n';
+                    fmt::print("{}\n", way.id);
         return true;
     });
 ```
@@ -319,6 +334,15 @@ The public package does not install this header.
 
 The example in `test/integration/count_all.cpp` uses a different counter for each thread and entity type.
 The `Counter` type is in `test/integration/counter.h`.
+Displayed counts use fixed comma groups, such as `10,846,489,004`.
+IDs and CSV numbers do not use comma groups.
+The output uses fmt and does not require system locale settings.
+
+To measure the run time in Bash, use this command:
+
+```bash
+time ./build/test/integration/count_all path/to/planet.osm.pbf
+```
 
 ```cpp
 std::vector<input_osm::Counter<uint64_t>> counters(3 * input_osm::thread_count());
@@ -351,6 +375,7 @@ This code from `test/integration/statistics.cpp` collects counts, maximum values
 It uses a different array entry for each thread.
 The `block_index` variable identifies this PBF block.
 The counter types are in `test/integration/counter.h`.
+Include `<fmt/format.h>` and `<fmt/chrono.h>` for this example.
 
 ```cpp
     std::vector<input_osm::u64_64B> node_count(input_osm::thread_count(), 0);
@@ -473,57 +498,60 @@ The counter types are in `test/integration/counter.h`.
                 return true;
             }))
     {
-        std::cerr << "Error while processing pbf\n";
+        fmt::print(stderr, "Error while processing pbf\n");
         return EXIT_FAILURE;
     }
 
-    std::cout.imbue(std::locale(""));
-    std::cout << "nodes: " << std::accumulate(node_count.begin(), node_count.end(), 0LLU) << "\n";
-    std::cout << "ways: " << std::accumulate(way_count.begin(), way_count.end(), 0LLU) << "\n";
-    std::cout << "relations: " << std::accumulate(relation_count.begin(), relation_count.end(), 0LLU) << "\n";
+    fmt::print("nodes: {}\n", fmt::group_digits(std::accumulate(node_count.begin(), node_count.end(), 0LLU)));
+    fmt::print("ways: {}\n", fmt::group_digits(std::accumulate(way_count.begin(), way_count.end(), 0LLU)));
+    fmt::print("relations: {}\n", fmt::group_digits(std::accumulate(relation_count.begin(), relation_count.end(), 0LLU)));
 
-    std::cout << "max nodes per block: " << *std::max_element(max_node_count.begin(), max_node_count.end()) << "\n";
-    std::cout << "max node tags per block: " << *std::max_element(max_node_tag_count.begin(), max_node_tag_count.end())
-              << "\n";
+    fmt::print("max nodes per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_node_count.begin(), max_node_count.end())));
+    fmt::print("max node tags per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_node_tag_count.begin(), max_node_tag_count.end())));
 
-    std::cout << "max ways per block: " << *std::max_element(max_way_count.begin(), max_way_count.end()) << "\n";
-    std::cout << "max way tags per block: " << *std::max_element(max_way_tag_count.begin(), max_way_tag_count.end())
-              << "\n";
-    std::cout << "max way nodes per block: " << *std::max_element(max_way_node_count.begin(), max_way_node_count.end())
-              << "\n";
+    fmt::print("max ways per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_way_count.begin(), max_way_count.end())));
+    fmt::print("max way tags per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_way_tag_count.begin(), max_way_tag_count.end())));
+    fmt::print("max way nodes per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_way_node_count.begin(), max_way_node_count.end())));
 
-    std::cout << "max relations per block: " << *std::max_element(max_relation_count.begin(), max_relation_count.end())
-              << "\n";
-    std::cout << "max relation tags per block: "
-              << *std::max_element(max_relation_tag_count.begin(), max_relation_tag_count.end()) << "\n";
-    std::cout << "max relation members per block: "
-              << *std::max_element(max_relation_member_count.begin(), max_relation_member_count.end()) << "\n";
+    fmt::print("max relations per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_relation_count.begin(), max_relation_count.end())));
+    fmt::print("max relation tags per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_relation_tag_count.begin(),
+                                                             max_relation_tag_count.end())));
+    fmt::print("max relation members per block: {}\n",
+               fmt::group_digits<uint64_t>(*std::max_element(max_relation_member_count.begin(),
+                                                             max_relation_member_count.end())));
 
     auto timestamp_to_str = [](const time_t in_time_t) -> std::string {
-        std::stringstream ss;
-        ss << std::put_time(std::gmtime(&in_time_t), "%F %T %Z");
-        return ss.str();
+        return fmt::format("{:%F %T} GMT", fmt::gmtime(in_time_t));
     };
 
-    std::cout << "max node timestamp: "
-              << timestamp_to_str(*std::max_element(node_timestamp.begin(), node_timestamp.end())) << std::endl;
-    std::cout << "max way timestamp: "
-              << timestamp_to_str(*std::max_element(way_timestamp.begin(), way_timestamp.end())) << std::endl;
-    std::cout << "max relation timestamp: "
-              << timestamp_to_str(*std::max_element(relation_timestamp.begin(), relation_timestamp.end())) << std::endl;
+    fmt::print("max node timestamp: {}\n",
+               timestamp_to_str(*std::max_element(node_timestamp.begin(), node_timestamp.end())));
+    fmt::print("max way timestamp: {}\n", timestamp_to_str(*std::max_element(way_timestamp.begin(), way_timestamp.end())));
+    fmt::print("max relation timestamp: {}\n",
+               timestamp_to_str(*std::max_element(relation_timestamp.begin(), relation_timestamp.end())));
 
-    std::cout << "max file block index: " << *std::max_element(block_index.begin(), block_index.end()) << std::endl;
+    fmt::print("max file block index: {}\n",
+               static_cast<uint64_t>(*std::max_element(block_index.begin(), block_index.end())));
 
-    std::cout << "nodes with tags: " << std::accumulate(node_with_tags_count.begin(), node_with_tags_count.end(), 0LLU)
-              << "\n";
-    std::cout << "ways with tags: " << std::accumulate(ways_with_tags_count.begin(), ways_with_tags_count.end(), 0LLU)
-              << "\n";
-    std::cout << "relations with tags: "
-              << std::accumulate(relations_with_tags_count.begin(), relations_with_tags_count.end(), 0LLU) << "\n";
+    fmt::print("nodes with tags: {}\n",
+               fmt::group_digits(std::accumulate(node_with_tags_count.begin(), node_with_tags_count.end(), 0LLU)));
+    fmt::print("ways with tags: {}\n",
+               fmt::group_digits(std::accumulate(ways_with_tags_count.begin(), ways_with_tags_count.end(), 0LLU)));
+    fmt::print(
+        "relations with tags: {}\n",
+        fmt::group_digits(std::accumulate(relations_with_tags_count.begin(), relations_with_tags_count.end(), 0LLU)));
 
-    std::cout << "max node id: " << *std::max_element(max_node_id.begin(), max_node_id.end()) << "\n";
-    std::cout << "max way id: " << *std::max_element(max_way_id.begin(), max_way_id.end()) << "\n";
-    std::cout << "max relation id: " << *std::max_element(max_relation_id.begin(), max_relation_id.end()) << "\n";
+    fmt::print("max node id: {}\n", static_cast<int64_t>(*std::max_element(max_node_id.begin(), max_node_id.end())));
+    fmt::print("max way id: {}\n", static_cast<int64_t>(*std::max_element(max_way_id.begin(), max_way_id.end())));
+    fmt::print("max relation id: {}\n",
+               static_cast<int64_t>(*std::max_element(max_relation_id.begin(), max_relation_id.end())));
 ```
 
 ## 8. Logs and diagnostics

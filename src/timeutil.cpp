@@ -14,7 +14,7 @@
 #include "timeutil.h"
 #include <chrono>
 #include <ctime>
-#include <cinttypes>
+#include <fmt/chrono.h>
 
 int64_t now_ms()
 {
@@ -50,31 +50,26 @@ time_t str_to_timestamp_osmstate(const char* str)
 
 std::string timestamp_to_str(const time_t rawtime)
 {
-    struct tm* dt;
-    char buffer[30];
-    dt = gmtime(&rawtime);
-    strftime(buffer, sizeof(buffer), "%F %T", dt);
-    return std::string(buffer);
+    return fmt::format("{:%F %T}", fmt::gmtime(rawtime));
 }
 
 std::string duration_to_str(int64_t nano)
 {
-    char buffer[256];
     if (nano < 1000l)
     {
-        snprintf(buffer, 256, "%" PRId64 " ns", nano);
+        return fmt::format("{} ns", nano);
     }
     else if (nano < 1000000l)
     {
-        snprintf(buffer, 256, "%.3f μs", nano / 1000.0);
+        return fmt::format("{:.3f} μs", nano / 1000.0);
     }
     else if (nano < 1000000000l) // Less than 1 second.
     {
-        snprintf(buffer, 256, "%.3f ms", nano / 1000000.0);
+        return fmt::format("{:.3f} ms", nano / 1000000.0);
     }
     else if (nano < 60000000000l) // Less than 60 seconds.
     {
-        snprintf(buffer, 256, "%.3f s", nano / 1000000000.0);
+        return fmt::format("{:.3f} s", nano / 1000000000.0);
     }
     else
     {
@@ -85,9 +80,8 @@ std::string duration_to_str(int64_t nano)
         minutes = minutes % 60;
 
         if (hours > 0)
-            snprintf(buffer, 256, "%" PRId64 " hours %" PRId64 " minutes %" PRId64 " seconds", hours, minutes, seconds);
+            return fmt::format("{} hours {} minutes {} seconds", hours, minutes, seconds);
         else
-            snprintf(buffer, 256, "%" PRId64 " minutes %" PRId64 " seconds", minutes, seconds);
+            return fmt::format("{} minutes {} seconds", minutes, seconds);
     }
-    return std::string(buffer);
 }
