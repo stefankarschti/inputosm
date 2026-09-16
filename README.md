@@ -112,7 +112,6 @@ The build uses the compiled `fmt::fmt` target.
 libdeflate uses the [MIT license](https://github.com/ebiggers/libdeflate/blob/v1.26/COPYING), which permits use with the inputosm Apache-2.0 license.
 The reader keeps one decompressor and one reusable output buffer per worker.
 It checks the zlib-format checksum, the complete compressed input length, and the exact output size.
-Refer to the [DACH benchmark results](docs/benchmarks/libdeflate-integration-2026-09-16/README.md) for the measured performance change.
 
 ### Build the library
 
