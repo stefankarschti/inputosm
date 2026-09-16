@@ -5,11 +5,12 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <zlib.h>
+#include <libdeflate.h>
 #include <unistd.h>
 
 namespace pbf_test
@@ -61,14 +62,13 @@ inline std::string raw_block(std::string_view type, std::string_view payload)
 }
 inline std::string compressed(std::string_view payload)
 {
-    uLongf size = compressBound(payload.size());
-    std::string result(size, '\0');
-    if (compress2(reinterpret_cast<Bytef*>(result.data()),
-                  &size,
-                  reinterpret_cast<const Bytef*>(payload.data()),
-                  payload.size(),
-                  6) != Z_OK)
-        throw std::runtime_error("Fixture compression failed");
+    const std::unique_ptr<libdeflate_compressor, decltype(&libdeflate_free_compressor)> compressor(
+        libdeflate_alloc_compressor(6), libdeflate_free_compressor);
+    if (!compressor) throw std::runtime_error("Cannot allocate fixture compressor");
+    std::string result(libdeflate_zlib_compress_bound(compressor.get(), payload.size()), '\0');
+    const auto size = libdeflate_zlib_compress(
+        compressor.get(), payload.data(), payload.size(), result.data(), result.size());
+    if (size == 0) throw std::runtime_error("Fixture compression failed");
     result.resize(size);
     return result;
 }

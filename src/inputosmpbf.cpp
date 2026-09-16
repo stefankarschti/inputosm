@@ -20,13 +20,14 @@
 #include <condition_variable>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
-#include <zlib.h>
+#include <libdeflate.h>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -249,6 +250,36 @@ struct storage_t
     }
 };
 
+struct blob_decoder_t
+{
+    std::unique_ptr<libdeflate_decompressor, decltype(&libdeflate_free_decompressor)> decompressor{
+        nullptr, libdeflate_free_decompressor};
+    std::unique_ptr<uint8_t[]> buffer;
+    size_t capacity = 0;
+
+    bytes_t decompress(bytes_t payload, size_t raw_size)
+    {
+        if (!decompressor)
+        {
+            decompressor.reset(libdeflate_alloc_decompressor());
+            require(decompressor != nullptr, "Cannot allocate PBF decompressor");
+        }
+        const auto required = std::max<size_t>(1, raw_size);
+        if (required > capacity)
+        {
+            // The decompressor overwrites this buffer before the reader uses it.
+            buffer.reset(new uint8_t[required]);
+            capacity = required;
+        }
+        size_t input_size = 0;
+        // A null output count requires exactly raw_size decompressed bytes.
+        const auto result = libdeflate_zlib_decompress_ex(
+            decompressor.get(), payload.data(), payload.size(), buffer.get(), raw_size, &input_size, nullptr);
+        require(result == LIBDEFLATE_SUCCESS && input_size == payload.size(), "Invalid Zlib Blob data");
+        return {buffer.get(), raw_size};
+    }
+};
+
 struct decoder_t
 {
     bool metadata;
@@ -256,7 +287,7 @@ struct decoder_t
     std::vector<bytes_t> groups;
     // The columns contain IDs, coordinates, tags, and the six DenseInfo fields.
     std::array<std::vector<field_t>, 10> dense_fields;
-    std::vector<uint8_t> raw;
+    blob_decoder_t raw;
     storage_t storage;
     pbf_block_t block;
 
@@ -699,7 +730,7 @@ descriptor_t read_descriptor(reader_t& reader, size_t index, uint64_t offset)
     return result;
 }
 
-bytes_t blob_data(bytes_t blob, std::vector<uint8_t>& buffer)
+bytes_t blob_data(bytes_t blob, blob_decoder_t& decoder)
 {
     reader_t reader(blob);
     bytes_t payload;
@@ -730,13 +761,7 @@ bytes_t blob_data(bytes_t blob, std::vector<uint8_t>& buffer)
         return payload;
     }
     require(has_raw_size && static_cast<size_t>(raw_size) < max_raw_size, "Invalid uncompressed Blob size");
-    buffer.resize(std::max<size_t>(1, static_cast<size_t>(raw_size)));
-    uLongf output_size = buffer.size();
-    uLong input_size = payload.size();
-    const int result = uncompress2(buffer.data(), &output_size, payload.data(), &input_size);
-    require(result == Z_OK && output_size == static_cast<size_t>(raw_size) && input_size == payload.size(),
-            "Invalid Zlib Blob data");
-    return {buffer.data(), static_cast<size_t>(raw_size)};
+    return decoder.decompress(payload, static_cast<size_t>(raw_size));
 }
 
 void validate_header(bytes_t bytes)
@@ -920,12 +945,11 @@ bool read_file(const char* filename, context_t& context)
     uint64_t offset = 0;
     auto descriptor = read_descriptor(reader, index++, offset);
     require(descriptor.type == "OSMHeader", "Missing initial OSMHeader");
-    std::vector<uint8_t> header_buffer;
-    validate_header(blob_data(descriptor.blob, header_buffer));
+    decoder_t decoder(context.metadata);
+    validate_header(blob_data(descriptor.blob, decoder.raw));
     offset = static_cast<uint64_t>(descriptor.blob.data() - mapping.bytes().data()) + descriptor.blob.size();
     const auto count = thread_count();
     std::vector<std::thread> workers;
-    decoder_t decoder(context.metadata);
     try
     {
         if (count > 1)

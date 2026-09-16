@@ -32,7 +32,7 @@ The XML reader uses the thread that calls `input_file()`.
 - Use different callbacks for nodes, ways, and relations.
 - Select metadata, such as versions, timestamps, and changesets, for PBF decoding.
 - Set a callback for log messages.
-- Use Expat and Zlib as the library dependencies.
+- Use Expat and libdeflate as the library dependencies.
 - Use node, way, and relation structures that each occupy a maximum of 64 bytes.
 
 ## 2. Start
@@ -94,10 +94,18 @@ The supplied `count_all` example uses multiple threads and a different counter f
 ### Requirements
 
 - CMake version 3.16 or a subsequent version
-- A C++20 compiler
+- C and C++20 compilers
 - An operating system with the POSIX interfaces that the source files use
-- Expat and Zlib version 1.2.9 or a subsequent version
+- Expat
 - clang-tidy, unless `ENABLE_CLANG_TIDY` is `OFF`
+
+CMake FetchContent downloads libdeflate 1.26 with a fixed SHA-256 check.
+The first configuration requires network access.
+For an offline build, set `FETCHCONTENT_SOURCE_DIR_LIBDEFLATE` to a local libdeflate 1.26 source directory.
+libdeflate uses the [MIT license](https://github.com/ebiggers/libdeflate/blob/v1.26/COPYING), which permits use with the inputosm Apache-2.0 license.
+The reader keeps one decompressor and one reusable output buffer per worker.
+It checks the zlib-format checksum, the complete compressed input length, and the exact output size.
+Refer to the [DACH benchmark results](docs/benchmarks/libdeflate-integration-2026-09-16/README.md) for the measured performance change.
 
 ### Build the library
 
@@ -120,6 +128,7 @@ The supplied `count_all` example uses multiple threads and a different counter f
    ```
 
 The package contains headers, the library, CMake package files, and a pkg-config file.
+It also installs the fetched libdeflate static library, package files, header, and license notice.
 
 ### Build with Ninja
 
@@ -150,9 +159,11 @@ To get the compiler and linker options with pkg-config, use this command:
 pkg-config --cflags --libs inputosm
 ```
 
+For a static inputosm library, add `--static` to include the private dependencies.
+
 ## 4. Conan usages
 
-Conan can get the Expat and Zlib dependencies.
+Conan can get Expat. CMake FetchContent supplies libdeflate.
 
 1. Configure the project through the Conan directory.
 

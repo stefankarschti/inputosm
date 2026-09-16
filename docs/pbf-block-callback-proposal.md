@@ -539,7 +539,7 @@ The new mode adds one `std::function` call for each data block.
 It can use more memory than the existing entity mode when blocks contain many groups.
 Measure this cost before any change to vector capacity retention.
 No new runtime dependency is necessary.
-Zlib version 1.2.9 is the minimum for compressed input length validation.
+libdeflate checks the compressed input length and exact output size.
 
 String views remove the secondary string byte buffer from both PBF delivery modes.
 View records still require memory for both a pointer and a length.

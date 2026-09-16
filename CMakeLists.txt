@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(inputosm VERSION 0.2.0 LANGUAGES CXX)
+project(inputosm VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +12,11 @@ include(CTest)
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
 option(ENABLE_CLANG_TIDY "Enable clang-tidy checks" ON)
+
+# Find the dependencies for inputosm.
+find_package(EXPAT REQUIRED)
+find_package(Threads REQUIRED)
+add_subdirectory(cmake/libdeflate)
 
 if(WARNINGS_AS_ERRORS)
     if(MSVC)
@@ -30,11 +35,6 @@ if (ENABLE_CLANG_TIDY)
     endif()
     set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND};--extra-arg=-Wno-unknown-warning-option;--extra-arg=-Wno-pragmas")
 endif()
-
-# Find the dependencies for inputosm.
-find_package(EXPAT REQUIRED)
-find_package(ZLIB 1.2.9 REQUIRED)
-find_package(Threads REQUIRED)
 
 # Specify the source files.
 set(SOURCES
@@ -55,7 +55,7 @@ target_include_directories(${LIBRARY_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB Threads::Threads)
+target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT libdeflate::libdeflate_static Threads::Threads)
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_20)
 
 if(BUILD_TESTING)
