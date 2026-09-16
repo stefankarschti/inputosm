@@ -13,3 +13,8 @@ add_test(NAME read_osc COMMAND read_osc_test)
 set_tests_properties(thread_config PROPERTIES LABELS unit)
 set_tests_properties(read_osm PROPERTIES LABELS unit)
 set_tests_properties(read_osc PROPERTIES LABELS unit)
+
+add_executable(pbf_block_test pbf_block_test.cpp)
+target_link_libraries(pbf_block_test PRIVATE inputosm::inputosm ZLIB::ZLIB Threads::Threads)
+add_test(NAME pbf_block COMMAND pbf_block_test)
+set_tests_properties(pbf_block PROPERTIES LABELS unit TIMEOUT 60)

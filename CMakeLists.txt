@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(inputosm VERSION 0.1.4 LANGUAGES CXX)
+project(inputosm VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,7 +33,8 @@ endif()
 
 # Find the dependencies for inputosm.
 find_package(EXPAT REQUIRED)
-find_package(ZLIB REQUIRED)
+find_package(ZLIB 1.2.9 REQUIRED)
+find_package(Threads REQUIRED)
 
 # Specify the source files.
 set(SOURCES
@@ -54,7 +55,8 @@ target_include_directories(${LIBRARY_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB)
+target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB Threads::Threads)
+target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_20)
 
 if(BUILD_TESTING)
     add_subdirectory(test/unit)

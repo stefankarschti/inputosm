@@ -12,1047 +12,1045 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
-
 #include "inputosmlog.h"
-#include "timeutil.h"
 
-#include <cstdint>
-#include <cinttypes>
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <condition_variable>
 #include <cstring>
-#include <vector>
-#include <zlib.h>
-#include <thread>
-#include <iostream>
+#include <limits>
 #include <mutex>
 #include <queue>
-#include <iomanip>
+#include <stdexcept>
+#include <thread>
+#include <utility>
+#include <vector>
+#include <zlib.h>
 
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace input_osm
 {
-
-/**
- * @brief References for the PBF format and Protocol Buffers.
- * @link https://wiki.openstreetmap.org/wiki/PBF_Format @endlink
- * @link https://developers.google.com/protocol-buffers/docs/encoding#structure @endlink
- */
-
 extern bool decode_metadata;
-extern std::function<bool(span_t<node_t>)> node_handler;
-extern std::function<bool(span_t<way_t>)> way_handler;
-extern std::function<bool(span_t<relation_t>)> relation_handler;
+extern std::function<bool(std::span<const node_t>)> node_handler;
+extern std::function<bool(std::span<const way_t>)> way_handler;
+extern std::function<bool(std::span<const relation_t>)> relation_handler;
 
-extern bool verbose;
+namespace
+{
+using bytes_t = std::span<const uint8_t>;
+constexpr size_t max_header_size = 64 * 1024;
+constexpr size_t max_raw_size = 32 * 1024 * 1024;
+size_t configured_threads = 0;
+
+[[noreturn, gnu::cold, gnu::noinline]] void invalid(const char* message)
+{
+    throw std::runtime_error(message);
+}
+
+void require(bool condition, const char* message)
+{
+    if (!condition) [[unlikely]]
+        invalid(message);
+}
+
 struct field_t
 {
-    uint32_t key{0}; // https://developers.google.com/protocol-buffers/docs/encoding#structure
-    uint8_t* pointer{nullptr};
-    uint64_t length{0};
-    uint64_t value_uint64{0};
+    uint32_t number = 0;
+    uint8_t wire = 0;
+    uint64_t value = 0;
+    bytes_t bytes;
+
+    void expect(uint8_t expected) const { require(wire == expected, "Invalid field wire type"); }
+    uint64_t integer() const
+    {
+        expect(0);
+        return value;
+    }
+    bytes_t message() const
+    {
+        expect(2);
+        return bytes;
+    }
 };
 
-struct string_table_t
+class reader_t
 {
-    std::vector<std::size_t> st_index;
-    std::vector<uint8_t> st_buffer;
-
-    void clear()
+public:
+    explicit reader_t(bytes_t bytes)
+        : remaining_(bytes)
     {
-        st_buffer.clear();
-        st_index.clear();
     }
-    void init(size_t byte_size)
+    bool empty() const { return remaining_.empty(); }
+    bytes_t take(size_t count)
     {
-        st_buffer.clear();
-        st_index.clear();
-        if (byte_size > st_buffer.capacity()) st_buffer.reserve(byte_size);
+        require(count <= remaining_.size(), "Truncated PBF field");
+        auto result = remaining_.first(count);
+        remaining_ = remaining_.subspan(count);
+        return result;
     }
-    void add(uint8_t* buf, size_t len)
+    [[gnu::always_inline]] inline uint64_t varint()
     {
-        st_index.emplace_back(st_buffer.size());
-        st_buffer.insert(st_buffer.end(), buf, buf + len);
-        st_buffer.emplace_back(0);
-    }
-
-    const char* get(uint32_t index) { return (const char*)st_buffer.data() + st_index[index]; }
-};
-
-// Data for this primitive block.
-thread_local string_table_t string_table;
-thread_local int32_t granularity = 100;
-thread_local int64_t lat_offset = 0;
-thread_local int64_t lon_offset = 0;
-thread_local int32_t date_granularity = 1000;
-
-static constexpr uint32_t KEY(uint32_t field_number, uint8_t wire_type)
-{
-    constexpr uint8_t kBitsForWT = 3u;
-    constexpr uint8_t kMaskForWT = ~(0xFFu << kBitsForWT) & 0xFFu;
-    return (field_number << kBitsForWT) | (wire_type & kMaskForWT);
-}
-
-inline uint32_t read_net_uint32(uint8_t* buf) noexcept
-{
-    return ((uint32_t)(buf[0]) << 24u) | ((uint32_t)(buf[1]) << 16u) | ((uint32_t)(buf[2]) << 8u) |
-           ((uint32_t)(buf[3]));
-}
-
-inline uint64_t read_varint_uint64(uint8_t*& ptr) noexcept
-{
-    uint64_t v64 = 0;
-    unsigned shift = 0;
-    while (1)
-    {
-        uint64_t c = *ptr++;
-        v64 |= (c & 0x7f) << shift;
-        if (!(c & 0x80)) break;
-        shift += 7;
-    }
-    return v64;
-}
-
-inline int64_t to_sint64(uint64_t v64) noexcept
-{
-    return (v64 & 1) ? -(int64_t)((v64 + 1) / 2) : (v64 + 1) / 2;
-}
-
-inline uint64_t read_varint_sint64(uint8_t*& ptr) noexcept
-{
-    return to_sint64(read_varint_uint64(ptr));
-}
-
-inline int64_t read_varint_int64(uint8_t*& ptr) noexcept
-{
-    return (int64_t)read_varint_uint64(ptr);
-}
-
-inline uint8_t* read_field(uint8_t* ptr, field_t& field) noexcept
-{
-    field.key = read_varint_uint64(ptr); // The field key is a varint.
-    field.pointer = ptr;
-    switch (field.key & 0x07) // Wire type
-    {
-        case 0: // Varint
-            field.value_uint64 = read_varint_uint64(ptr);
-            field.length = ptr - field.pointer;
-            break;
-        case 1: // 64-bit field
-            field.length = 8;
-            ptr += field.length;
-            break;
-        case 2: // Length-delimited field
-            field.length = read_varint_uint64(ptr);
-            field.pointer = ptr;
-            ptr += field.length;
-            break;
-        case 5: // 32-bit field
-            field.length = 4;
-            ptr += field.length;
-            break;
-        default:
-            field.length = 0;
-            ptr = nullptr;
-    }
-    return ptr;
-}
-
-inline bool unzip_compressed_block(uint8_t* zip_ptr, size_t zip_sz, uint8_t* raw_ptr, size_t raw_sz) noexcept
-{
-    uLongf size = raw_sz;
-    int ret = uncompress(raw_ptr, &size, zip_ptr, zip_sz);
-    return ret == Z_OK && size == raw_sz;
-}
-
-inline void read_sint64_packed(std::vector<int64_t>& packed, uint8_t* ptr, uint8_t* end) noexcept
-{
-    while (ptr < end) packed.emplace_back(read_varint_sint64(ptr));
-}
-
-inline void read_sint32_packed(std::vector<int32_t>& packed, uint8_t* ptr, uint8_t* end) noexcept
-{
-    while (ptr < end) packed.emplace_back(read_varint_sint64(ptr));
-}
-
-inline void read_uint32_packed(std::vector<uint32_t>& packed, uint8_t* ptr, uint8_t* end) noexcept
-{
-    while (ptr < end) packed.emplace_back(read_varint_uint64(ptr));
-}
-
-template <typename Handler>
-inline bool iterate_fields(uint8_t* ptr, uint8_t* end, Handler&& handler) noexcept
-{
-    while (ptr < end)
-    {
-        field_t field;
-        ptr = read_field(ptr, field);
-        if (!ptr) return false;
-        if (!handler(field)) return false;
-    }
-    return true;
-}
-
-inline bool read_string_table(uint8_t* ptr, uint8_t* end) noexcept
-{
-    return iterate_fields(ptr, end, [&](field_t& field) -> bool {
-        if (field.key == KEY(1, 2)) // String
-            string_table.add(field.pointer, field.length);
-        return true;
-    });
-}
-
-template <typename T>
-inline bool check_capacity(std::vector<T>& vec, std::size_t index, const char* subject)
-{
-    size_t previous_capacity = vec.capacity();
-    while (index >= vec.size())
-    {
-        vec.emplace_back();
-        if (vec.capacity() > previous_capacity)
+        uint64_t result = 0;
+        for (unsigned shift = 0; shift < 70; shift += 7)
         {
-            IOSM_TRACE("%s capacity exceeded: %zu/%zu on thread %zu",
-                       subject,
-                       vec.capacity(),
-                       previous_capacity,
-                       thread_index);
-            return false;
+            const auto byte = take(1)[0];
+            require(shift != 63 || byte <= 1, "PBF varint overflow");
+            result |= uint64_t(byte & 0x7f) << shift;
+            if (!(byte & 0x80)) return result;
         }
+        throw std::runtime_error("Invalid PBF varint");
     }
-    return true;
-}
-
-bool read_dense_nodes(uint8_t* ptr, uint8_t* end) noexcept
-{
-    thread_local std::vector<node_t> node_list(16000);
-    node_list.clear();
-    thread_local std::vector<tag_t> tags(256000);
-    tags.clear();
-
-    if (!iterate_fields(ptr, end, [&](field_t& field) -> bool {
-            switch (field.key)
-            {
-                case KEY(1, 2): // Delta-encoded node IDs
-                {
-                    int64_t id = 0;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length;)
-                    {
-                        id += read_varint_sint64(ptr);
-                        node_list.emplace_back();
-                        node_list.back().id = id;
-                    }
-                }
+    [[gnu::always_inline]] inline field_t next(unsigned group_depth = 0)
+    {
+        const auto key = varint();
+        require(key >> 3 != 0 && key >> 3 <= 0x1fffffff, "Invalid PBF field number");
+        field_t field;
+        field.number = static_cast<uint32_t>(key >> 3);
+        field.wire = key & 7;
+        switch (field.wire)
+        {
+            case 0:
+                field.value = varint();
                 break;
-                case KEY(5, 2): // Metadata for dense nodes
-                    if (decode_metadata)
-                    {
-                        iterate_fields(field.pointer, field.pointer + field.length, [](field_t& field) -> bool {
-                            switch (field.key)
-                            {
-                                case KEY(1, 2): // Versions without delta encoding
-                                {
-                                    auto inode = node_list.begin();
-                                    for (auto ptr = field.pointer;
-                                         ptr < field.pointer + field.length && inode < node_list.end();
-                                         inode++)
-                                    {
-                                        inode->version = read_varint_uint64(ptr);
-                                    }
-                                }
-                                break;
-                                case KEY(2, 2): // Delta-encoded timestamps
-                                {
-                                    int64_t timestamp = 0;
-                                    auto inode = node_list.begin();
-                                    for (auto ptr = field.pointer;
-                                         ptr < field.pointer + field.length && inode < node_list.end();
-                                         inode++)
-                                    {
-                                        timestamp += read_varint_sint64(ptr);
-                                        inode->timestamp = timestamp;
-                                    }
-                                }
-                                break;
-                                case KEY(3, 2): // Delta-encoded changesets
-                                {
-                                    int64_t changeset = 0;
-                                    auto inode = node_list.begin();
-                                    for (auto ptr = field.pointer;
-                                         ptr < field.pointer + field.length && inode < node_list.end();
-                                         inode++)
-                                    {
-                                        changeset += read_varint_sint64(ptr);
-                                        inode->changeset = changeset;
-                                    }
-                                }
-                                break;
-                            }
-                            return true;
-                        });
-                    }
-                    break;
-                case KEY(8, 2): // Delta-encoded latitudes
-                {
-                    int64_t latitude = 0;
-                    auto inode = node_list.begin();
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end();
-                         inode++)
-                    {
-                        latitude += read_varint_sint64(ptr);
-                        inode->raw_latitude = latitude;
-                    }
-                }
+            case 1:
+                field.bytes = take(8);
                 break;
-                case KEY(9, 2): // Delta-encoded longitudes
-                {
-                    int64_t longitude = 0;
-                    auto inode = node_list.begin();
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length && inode < node_list.end();
-                         inode++)
-                    {
-                        longitude += read_varint_sint64(ptr);
-                        inode->raw_longitude = longitude;
-                    }
-                }
-                break;
-                case KEY(10, 2): // Packed indexes for keys and values
-                {
-                    bool invalid = true;
-                    while (invalid)
-                    {
-                        invalid = false;
-                        tags.clear();
-                        auto itag_start = tags.begin();
-                        auto inode = node_list.begin();
-                        size_t previous_capacity = tags.capacity();
-                        size_t tags_size = tags.size();
-                        for (auto ptr = field.pointer; ptr < field.pointer + field.length;)
-                        {
-                            // Read the key index.
-                            uint32_t istring = read_varint_uint64(ptr);
-                            if (!istring)
-                            {
-                                // Complete this node.
-                                if (itag_start != tags.end())
-                                {
-                                    inode->tags = span_t{&(*itag_start), static_cast<size_t>(tags.end() - itag_start)};
-                                }
-                                itag_start = tags.end();
-                                ++inode;
-                                continue;
-                            }
-                            // Add a tag.
-                            tags.emplace_back();
-                            ++tags_size;
-                            // Get the key string.
-                            tags.back().key = string_table.get(istring);
-                            // Read the value string.
-                            tags.back().value = string_table.get(read_varint_uint64(ptr));
-                            // Compare the tag count with the previous capacity.
-                            if (tags_size > previous_capacity)
-                            {
-                                // The tag addresses changed. Read the tags again.
-                                invalid = true;
-                                break;
-                            }
-                        }
-                    }
-                }
+            case 2: {
+                const auto size = varint();
+                require(size <= remaining_.size(), "Truncated PBF message");
+                field.bytes = take(static_cast<size_t>(size));
                 break;
             }
-            return true;
-        }))
-        return false;
+            case 3:
+                skip_group(field.number, group_depth);
+                break;
+            case 4:
+                require(group_depth != 0, "Unexpected PBF group end");
+                break;
+            case 5:
+                field.bytes = take(4);
+                break;
+            default:
+                throw std::runtime_error("Unsupported PBF wire type");
+        }
+        return field;
+    }
 
-    // Call the node handler.
-    if (!node_handler(span_t{node_list.data(), node_list.size()})) return false;
-    return true;
-    ;
+private:
+    [[gnu::cold, gnu::noinline]] void skip_group(uint32_t number, unsigned depth)
+    {
+        require(depth < 64, "PBF group nesting limit exceeded");
+        for (;;)
+        {
+            const auto nested = next(depth + 1);
+            if (nested.wire != 4) continue;
+            require(nested.number == number, "Invalid PBF group end");
+            return;
+        }
+    }
+    bytes_t remaining_;
+};
+
+int64_t signed_integer(uint64_t value)
+{
+    return std::bit_cast<int64_t>(value);
+}
+int64_t zigzag(uint64_t value)
+{
+    return signed_integer((value >> 1) ^ (uint64_t{0} - (value & 1)));
+}
+int32_t narrow(int64_t value)
+{
+    require(value >= std::numeric_limits<int32_t>::min() && value <= std::numeric_limits<int32_t>::max(),
+            "PBF value exceeds the public field range");
+    return static_cast<int32_t>(value);
+}
+int64_t add_delta(int64_t previous, int64_t delta)
+{
+    int64_t result;
+    require(!__builtin_add_overflow(previous, delta, &result), "PBF delta overflow");
+    return result;
+}
+std::string_view text(bytes_t bytes)
+{
+    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+}
+template <class Consume>
+void repeated(const field_t& field, Consume consume)
+{
+    if (field.wire == 0)
+    {
+        consume(field.value);
+        return;
+    }
+    reader_t reader(field.message());
+    while (!reader.empty()) consume(reader.varint());
 }
 
 template <class T>
-bool read_info(T& obj, uint8_t* ptr, uint8_t* end) noexcept
+T& column_item(std::vector<T>& output, size_t index)
 {
-    return iterate_fields(ptr, end, [&](field_t& field) -> bool {
-        switch (field.key)
-        {
-            case KEY(1, 0): // Version
-                obj.version = field.value_uint64;
-                break;
-            case KEY(2, 0): // Timestamp
-                obj.timestamp = field.value_uint64;
-                break;
-            case KEY(3, 0): // Changeset
-                obj.changeset = field.value_uint64;
-                break;
-        }
-        return true;
-    });
+    // Each column advances by one element from the same start position.
+    if (index == output.size()) output.emplace_back();
+    return output[index];
 }
 
-enum class result_t
+struct range_t
 {
-    ok = 0,
-    error = 1,
-    eoutofmem = 2
+    size_t start = 0;
+    size_t size = 0;
 };
 
-result_t read_way(uint8_t* ptr,
-                  uint8_t* end,
-                  std::vector<way_t>& way_list,
-                  std::vector<tag_t>& tags,
-                  std::vector<int64_t>& node_refs) noexcept
+struct storage_t
 {
-    way_t way;
-    auto node_ref_begin = node_refs.size();
-    auto tags_begin = tags.size();
-    result_t result = result_t::ok;
+    std::vector<node_t> nodes;
+    std::vector<way_t> ways;
+    std::vector<relation_t> relations;
+    std::vector<tag_t> tags;
+    std::vector<int64_t> refs;
+    std::vector<relation_member_t> members;
+    std::vector<range_t> node_tags, way_tags, relation_tags, way_refs, relation_members;
 
-    if (!iterate_fields(ptr, end, [&](field_t& field) -> bool {
-            switch (field.key)
-            {
-                case KEY(1, 0): // Way ID
-                    way.id = field.value_uint64;
-                    break;
-                case KEY(2, 2): // Packed key indexes
-                {
-                    int index = tags_begin;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(tags, index, "way tags"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        tags[index].key = string_table.get(read_varint_uint64(ptr));
-                    }
-                }
-                break;
-                case KEY(3, 2): // Packed value indexes
-                {
-                    int index = tags_begin;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(tags, index, "way tags"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        tags[index].value = string_table.get(read_varint_uint64(ptr));
-                    }
-                }
-                break;
-                case KEY(4, 2): // Way metadata
-                    if (decode_metadata) read_info<way_t>(way, field.pointer, field.pointer + field.length);
-                    break;
-                case KEY(8, 2): // Node references
-                {
-                    int64_t id = 0;
-                    size_t previous_capacity = node_refs.capacity();
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length;)
-                    {
-                        id += read_varint_sint64(ptr);
-                        node_refs.push_back(id);
-                        if (node_refs.capacity() > previous_capacity)
-                        {
-                            IOSM_TRACE("way node ref capacity exceeded: %" PRIu64 "/ %" PRIu64 " on thread %" PRIu64,
-                                       node_refs.capacity(),
-                                       previous_capacity,
-                                       thread_index);
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                    }
-                }
-                break;
-            }
-            return true;
-        }))
+    void clear()
     {
-        // There was an error during the read operation.
-        if (result_t::eoutofmem == result)
+        nodes.clear();
+        ways.clear();
+        relations.clear();
+        tags.clear();
+        refs.clear();
+        members.clear();
+        node_tags.clear();
+        way_tags.clear();
+        relation_tags.clear();
+        way_refs.clear();
+        relation_members.clear();
+    }
+    void finish()
+    {
+        const std::span<const tag_t> tag_span(tags);
+        for (size_t i = 0; i < nodes.size(); ++i)
+            nodes[i].tags = tag_span.subspan(node_tags[i].start, node_tags[i].size);
+        for (size_t i = 0; i < ways.size(); ++i)
         {
-            // Remove the data that is not complete.
-            node_refs.erase(node_refs.begin() + node_ref_begin, node_refs.end());
-            tags.erase(tags.begin() + tags_begin, tags.end());
+            ways[i].tags = tag_span.subspan(way_tags[i].start, way_tags[i].size);
+            ways[i].node_refs = std::span<const int64_t>(refs).subspan(way_refs[i].start, way_refs[i].size);
         }
-        else
-            result = result_t::error;
-    }
-    else
-    {
-        // The read operation is complete.
-        // Node references
-        if (node_ref_begin != node_refs.size())
-            way.node_refs = {node_refs.data() + node_ref_begin, node_refs.size() - node_ref_begin};
-        // Tags
-        if (tags_begin != tags.size()) way.tags = {tags.data() + tags_begin, tags.size() - tags_begin};
-        // Add the entity to the list.
-        way_list.emplace_back(way);
-    }
-
-    return result;
-}
-
-result_t read_relation(uint8_t* ptr,
-                       uint8_t* end,
-                       std::vector<relation_t>& relation_list,
-                       std::vector<tag_t>& tags,
-                       std::vector<relation_member_t>& members) noexcept
-{
-    relation_t relation;
-    auto tags_begin = tags.size();
-    auto members_begin = members.size();
-    result_t result = result_t::ok;
-
-    if (!iterate_fields(ptr, end, [&](field_t& field) -> bool {
-            switch (field.key)
-            {
-                case KEY(1, 0): // Relation ID
-                    relation.id = field.value_uint64;
-                    break;
-                case KEY(2, 2): // Packed key indexes
-                {
-                    int index = tags_begin;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(tags, index, "relation tags"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        tags[index].key = string_table.get(read_varint_uint64(ptr));
-                    }
-                }
-                break;
-                case KEY(3, 2): // Packed value indexes
-                {
-                    int index = tags_begin;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(tags, index, "relation tags"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        tags[index].value = string_table.get(read_varint_uint64(ptr));
-                    }
-                }
-                break;
-                case KEY(4, 2): // Relation metadata
-                    if (decode_metadata) read_info<relation_t>(relation, field.pointer, field.pointer + field.length);
-                    break;
-                case KEY(8, 2): // Member roles
-                {
-                    int index = members_begin;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(members, index, "relation members"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        members[index].role = string_table.get(read_varint_uint64(ptr));
-                    }
-                }
-                break;
-                case KEY(9, 2): // Member IDs
-                {
-                    int index = members_begin;
-                    int64_t id = 0;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(members, index, "relation members"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        id += read_varint_sint64(ptr);
-                        members[index].id = id;
-                    }
-                }
-                break;
-                case KEY(10, 2): // Member types
-                {
-                    int index = members_begin;
-                    for (auto ptr = field.pointer; ptr < field.pointer + field.length; index++)
-                    {
-                        if (!check_capacity(members, index, "relation members"))
-                        {
-                            result = result_t::eoutofmem;
-                            return false;
-                        }
-                        members[index].type = read_varint_uint64(ptr);
-                    }
-                }
-                break;
-            }
-            return true;
-        }))
-    {
-        // There was an error during the read operation.
-        if (result_t::eoutofmem == result)
+        for (size_t i = 0; i < relations.size(); ++i)
         {
-            // Remove the data that is not complete.
-            tags.erase(tags.begin() + tags_begin, tags.end());
-            members.erase(members.begin() + members_begin, members.end());
+            relations[i].tags = tag_span.subspan(relation_tags[i].start, relation_tags[i].size);
+            relations[i].members = std::span<const relation_member_t>(members).subspan(relation_members[i].start,
+                                                                                       relation_members[i].size);
         }
-        else
-            result = result_t::error;
     }
-    else
-    {
-        // The read operation is complete.
-        // Tags
-        if (tags_begin != tags.size()) relation.tags = {tags.data() + tags_begin, tags.size() - tags_begin};
-        // Members
-        if (members_begin != members.size())
-            relation.members = {members.data() + members_begin, members.size() - members_begin};
-        // Add the entity to the list.
-        relation_list.emplace_back(relation);
-    }
+};
 
-    return result;
-}
-
-bool read_primitive_group(uint8_t* ptr, uint8_t* end) noexcept
+struct decoder_t
 {
-    thread_local std::vector<way_t> way_list(8000);
-    way_list.clear();
-    thread_local std::vector<tag_t> way_tags(256000);
-    way_tags.clear();
-    thread_local std::vector<int64_t> way_node_refs(1024000);
-    way_node_refs.clear();
+    bool metadata;
+    std::vector<std::string_view> string_table;
+    std::vector<bytes_t> groups;
+    // The columns contain IDs, coordinates, tags, and the six DenseInfo fields.
+    std::array<std::vector<field_t>, 10> dense_fields;
+    std::vector<uint8_t> raw;
+    storage_t storage;
+    pbf_block_t block;
 
-    thread_local std::vector<relation_t> relation_list(1024);
-    relation_list.clear();
-    thread_local std::vector<tag_t> relation_tags(32000);
-    relation_tags.clear();
-    thread_local std::vector<relation_member_t> relation_members(128000);
-    relation_members.clear();
-
-    // Read the entities.
-    size_t nodes_read{0}, ways_read{0}, relations_read{0};
-    bool restart_ways = true;
-    bool restart_relations = true;
-    bool result = true;
-    while (restart_ways || restart_relations)
+    explicit decoder_t(bool read_metadata)
+        : metadata(read_metadata)
     {
-        restart_ways = restart_relations = false;
-        size_t node_index{0}, way_index{0}, relation_index{0};
-        result = iterate_fields(ptr, end, [&](field_t& field) -> bool {
-            switch (field.key)
-            {
-                case KEY(1, 2): // Node
-                    break;
-                case KEY(2, 2): // Dense nodes
-                    if (node_index++ >= nodes_read && node_handler)
-                    {
-                        if (!read_dense_nodes(field.pointer, field.pointer + field.length)) return false;
-                        nodes_read++;
-                    }
-                    break;
-                case KEY(3, 2): // Way
-                    if (way_index++ >= ways_read && way_handler)
-                    {
-                        switch (
-                            read_way(field.pointer, field.pointer + field.length, way_list, way_tags, way_node_refs))
-                        {
-                            case result_t::eoutofmem:
-                                restart_ways = true;
-                            case result_t::error:
-                                return false;
-                            case result_t::ok:
-                                break;
-                        }
-                        ways_read++;
-                    }
-                    break;
-                case KEY(4, 2): // Relation
-                    if (relation_index++ >= relations_read && relation_handler)
-                    {
-                        switch (read_relation(field.pointer,
-                                              field.pointer + field.length,
-                                              relation_list,
-                                              relation_tags,
-                                              relation_members))
-                        {
-                            case result_t::eoutofmem:
-                                restart_relations = true;
-                            case result_t::error:
-                                return false;
-                            case result_t::ok:
-                                break;
-                        }
-                        relations_read++;
-                    }
-                    break;
-            }
-            return true;
+    }
+
+    std::string_view string(uint64_t index) const
+    {
+        require(index <= std::numeric_limits<uint32_t>::max() && index < string_table.size(),
+                "Invalid PBF string index");
+        return string_table[static_cast<size_t>(index)];
+    }
+    void read_tags(const field_t& field, size_t start, size_t& count, bool keys)
+    {
+        repeated(field, [&](uint64_t value) {
+            const auto view = string(value);
+            auto& tag = column_item(storage.tags, start + count++);
+            if (keys)
+                tag.key = view;
+            else
+                tag.value = view;
         });
-        if (restart_ways)
-        {
-            way_list.clear();
-            way_tags.clear();
-            way_node_refs.clear();
-            ways_read = 0;
-        }
-        if (restart_relations)
-        {
-            relation_list.clear();
-            relation_members.clear();
-            relation_tags.clear();
-            relations_read = 0;
-        }
-        if (restart_ways || restart_relations)
-        {
-            IOSM_TRACE("restarting read_primitive_group on thread %zu", thread_index);
-        }
     }
-    if (result)
+    template <class Entity>
+    void read_info(bytes_t bytes, Entity& entity)
     {
-        // Call the way handler.
-        if (way_handler)
-            if (!way_handler(span_t{way_list.data(), way_list.size()})) return false;
-
-        // Call the relation handler.
-        if (relation_handler)
-            if (!relation_handler(span_t{relation_list.data(), relation_list.size()})) return false;
-    }
-    return result;
-}
-
-bool read_primitve_block(uint8_t* ptr, uint8_t* end) noexcept
-{
-    // PrimitiveBlock
-    string_table.clear();
-
-    return iterate_fields(ptr, end, [&](field_t& field) -> bool {
-        switch (field.key)
+        reader_t reader(bytes);
+        while (!reader.empty())
         {
-            case KEY(1, 2): // String table
-                string_table.init(field.length);
-                if (!read_string_table(field.pointer, field.pointer + field.length)) return false;
-                break;
-            case KEY(2, 2): // Primitive group
-                if (!read_primitive_group(field.pointer, field.pointer + field.length)) return false;
-                break;
-            case KEY(17, 0): // Coordinate granularity in nanodegrees
-                granularity = (int64_t)field.value_uint64;
-                IOSM_TRACE("granularity: %" PRId32 " nanodegrees", granularity);
-                break;
-            case KEY(18, 0): // Timestamp granularity in milliseconds
-                date_granularity = (int64_t)field.value_uint64;
-                IOSM_TRACE("date granularity: %" PRId32 " milliseconds", date_granularity);
-                break;
-            case KEY(19, 0): // Latitude offset in nanodegrees
-                lat_offset = (int64_t)field.value_uint64;
-                IOSM_TRACE("latitude offset: %" PRId32 " nanodegrees", lat_offset);
-                break;
-            case KEY(20, 0): // Longitude offset in nanodegrees
-                lon_offset = (int64_t)field.value_uint64;
-                IOSM_TRACE("longitude offset: %" PRId32 " nanodegrees", lon_offset);
-                break;
-        }
-        return true;
-    });
-}
-
-bool read_header_block(uint8_t* ptr, uint8_t* end) noexcept
-{
-    // HeaderBlock
-    int64_t left{0}, right{0}, top{0}, bottom{0};
-    std::vector<std::string> required_features;
-    std::vector<std::string> optional_features;
-    std::string writing_program, source;
-    int64_t osmosis_replication_timestamp{0}, osmosis_sequence_number{0};
-    std::string osmosis_replication_base_url;
-
-    bool result = iterate_fields(ptr, end, [&](field_t& field) -> bool {
-        switch (field.key)
-        {
-            case KEY(1, 2): // HeaderBBox
+            const auto field = reader.next();
+            if (!metadata) continue;
+            switch (field.number)
             {
-                if (!iterate_fields(field.pointer,
-                                    field.pointer + field.length,
-                                    [&left, &right, &top, &bottom](field_t& field) -> bool {
-                                        switch (field.key)
-                                        {
-                                            case KEY(1, 0): // Left boundary
-                                                left = to_sint64(field.value_uint64);
-                                                break;
-                                            case KEY(2, 0): // Right boundary
-                                                right = to_sint64(field.value_uint64);
-                                                break;
-                                            case KEY(3, 0): // Top boundary
-                                                top = to_sint64(field.value_uint64);
-                                                break;
-                                            case KEY(4, 0): // Bottom boundary
-                                                bottom = to_sint64(field.value_uint64);
-                                                break;
-                                        }
-                                        return true;
-                                    }))
-                {
-                    return false;
-                }
-                IOSM_TRACE(
-                    "left: %.9f right: %.9f top: %.9f bottom: %.9f", left / 1e9, right / 1e9, top / 1e9, bottom / 1e9);
+                case 1:
+                    entity.version = narrow(signed_integer(field.integer()));
+                    break;
+                case 2:
+                    entity.timestamp = narrow(signed_integer(field.integer()));
+                    break;
+                case 3:
+                    entity.changeset = narrow(signed_integer(field.integer()));
+                    break;
+                case 5:
+                    (void)string(field.integer());
+                    break;
+                default:
+                    break;
             }
-            break;
-            case KEY(4, 2): // Required features
-                required_features.emplace_back(std::string((const char*)field.pointer, field.length));
-                IOSM_TRACE("required feature: %s", required_features.back().c_str());
-                break;
-            case KEY(5, 2): // Optional features
-                optional_features.emplace_back(std::string((const char*)field.pointer, field.length));
-                IOSM_TRACE("optional feature: %s", optional_features.back().c_str());
-                break;
-            case KEY(16, 2): // Program that wrote the file
-                writing_program = std::string((const char*)field.pointer, field.length);
-                IOSM_TRACE("writing_program: %s", writing_program.c_str());
-                break;
-            case KEY(17, 2): // Source
-                source = std::string((const char*)field.pointer, field.length);
-                IOSM_TRACE("source: %s", source.c_str());
-                break;
-            case KEY(32, 0): // osmosis_replication_timestamp
-                osmosis_replication_timestamp = field.value_uint64;
-                IOSM_TRACE("osmosis_replication_timestamp: %" PRId64 " '%s'",
-                           osmosis_replication_timestamp,
-                           timestamp_to_str(osmosis_replication_timestamp).c_str());
-                break;
-            case KEY(33, 0): // osmosis_replication_sequence_number
-                osmosis_sequence_number = field.value_uint64;
-                IOSM_TRACE("osmosis_sequence_number: %" PRId64 "",
-                           osmosis_sequence_number,
-                           timestamp_to_str(osmosis_replication_timestamp).c_str());
-                break;
-            case KEY(34, 0): // osmosis_replication_base_url
-                osmosis_replication_base_url = std::string((const char*)field.pointer, field.length);
-                IOSM_TRACE("osmosis_replication_base_url: %s", osmosis_replication_base_url.c_str());
-                break;
         }
-        return true;
-    });
+    }
+    void node(bytes_t bytes)
+    {
+        node_t result;
+        const auto start = storage.tags.size();
+        size_t keys = 0, values = 0;
+        unsigned required = 0;
+        reader_t reader(bytes);
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            switch (field.number)
+            {
+                case 1:
+                    result.id = zigzag(field.integer());
+                    required |= 1;
+                    break;
+                case 2:
+                    read_tags(field, start, keys, true);
+                    break;
+                case 3:
+                    read_tags(field, start, values, false);
+                    break;
+                case 4:
+                    read_info(field.message(), result);
+                    break;
+                case 8:
+                    result.raw_latitude = zigzag(field.integer());
+                    required |= 2;
+                    break;
+                case 9:
+                    result.raw_longitude = zigzag(field.integer());
+                    required |= 4;
+                    break;
+                default:
+                    break;
+            }
+        }
+        require(required == 7, "Missing required node field");
+        require(keys == values, "PBF tag arrays have different sizes");
+        storage.node_tags.push_back({start, keys});
+        storage.nodes.push_back(result);
+    }
+    void way(bytes_t bytes)
+    {
+        way_t result;
+        const auto tag_start = storage.tags.size(), ref_start = storage.refs.size();
+        size_t keys = 0, values = 0;
+        int64_t ref = 0;
+        bool has_id = false;
+        reader_t reader(bytes);
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            switch (field.number)
+            {
+                case 1:
+                    result.id = signed_integer(field.integer());
+                    has_id = true;
+                    break;
+                case 2:
+                    read_tags(field, tag_start, keys, true);
+                    break;
+                case 3:
+                    read_tags(field, tag_start, values, false);
+                    break;
+                case 4:
+                    read_info(field.message(), result);
+                    break;
+                case 8:
+                    repeated(field, [&](uint64_t value) {
+                        ref = add_delta(ref, zigzag(value));
+                        storage.refs.push_back(ref);
+                    });
+                    break;
+                default:
+                    break;
+            }
+        }
+        require(has_id, "Missing required way ID");
+        require(keys == values, "PBF tag arrays have different sizes");
+        storage.way_refs.push_back({ref_start, storage.refs.size() - ref_start});
+        storage.way_tags.push_back({tag_start, keys});
+        storage.ways.push_back(result);
+    }
+    void relation(bytes_t bytes)
+    {
+        relation_t result;
+        const auto tag_start = storage.tags.size(), member_start = storage.members.size();
+        size_t keys = 0, values = 0, roles = 0, ids = 0, types = 0;
+        int64_t id = 0;
+        bool has_id = false;
+        reader_t reader(bytes);
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            switch (field.number)
+            {
+                case 1:
+                    result.id = signed_integer(field.integer());
+                    has_id = true;
+                    break;
+                case 2:
+                    read_tags(field, tag_start, keys, true);
+                    break;
+                case 3:
+                    read_tags(field, tag_start, values, false);
+                    break;
+                case 4:
+                    read_info(field.message(), result);
+                    break;
+                case 8:
+                    repeated(field, [&](uint64_t value) {
+                        const auto role = string(value);
+                        column_item(storage.members, member_start + roles++).role = role;
+                    });
+                    break;
+                case 9:
+                    repeated(field, [&](uint64_t value) {
+                        id = add_delta(id, zigzag(value));
+                        column_item(storage.members, member_start + ids++).id = id;
+                    });
+                    break;
+                case 10:
+                    repeated(field, [&](uint64_t value) {
+                        require(value <= 2, "Invalid PBF relation member type");
+                        column_item(storage.members, member_start + types++).type = static_cast<uint8_t>(value);
+                    });
+                    break;
+                default:
+                    break;
+            }
+        }
+        require(has_id, "Missing required relation ID");
+        require(ids == roles && ids == types, "Invalid PBF member array sizes");
+        require(keys == values, "PBF tag arrays have different sizes");
+        storage.relation_members.push_back({member_start, ids});
+        storage.relation_tags.push_back({tag_start, keys});
+        storage.relations.push_back(result);
+    }
+    void collect_dense(bytes_t bytes)
+    {
+        reader_t reader(bytes);
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            switch (field.number)
+            {
+                case 1:
+                    dense_fields[0].push_back(field);
+                    break;
+                case 8:
+                case 9:
+                case 10:
+                    dense_fields[field.number - 7].push_back(field);
+                    break;
+                case 5: {
+                    reader_t info_reader(field.message());
+                    while (!info_reader.empty())
+                    {
+                        const auto entry = info_reader.next();
+                        if (metadata && entry.number >= 1 && entry.number <= 6)
+                            dense_fields[entry.number + 3].push_back(entry);
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+    template <class Consume>
+    void dense_column(size_t column, size_t start, Consume consume)
+    {
+        size_t index = start;
+        for (const auto& field : dense_fields[column])
+            repeated(field, [&](uint64_t value) {
+                require(index < storage.nodes.size(), "Invalid dense array size");
+                consume(storage.nodes[index++], value);
+            });
+        require(index == storage.nodes.size() || (column >= 4 && index == start), "Invalid dense array size");
+    }
+    void dense()
+    {
+        const size_t start = storage.nodes.size();
+        const bool single_packed = dense_fields[0].size() == 1 && dense_fields[1].size() == 1 &&
+                                   dense_fields[2].size() == 1 && dense_fields[0][0].wire == 2 &&
+                                   dense_fields[1][0].wire == 2 && dense_fields[2][0].wire == 2;
+        if (single_packed)
+        {
+            reader_t ids(dense_fields[0][0].message()), latitudes(dense_fields[1][0].message()),
+                     longitudes(dense_fields[2][0].message());
+            int64_t id = 0, latitude = 0, longitude = 0;
+            while (!ids.empty())
+            {
+                require(!latitudes.empty() && !longitudes.empty(), "Invalid dense array size");
+                node_t node;
+                node.id = id = add_delta(id, zigzag(ids.varint()));
+                node.raw_latitude = latitude = add_delta(latitude, zigzag(latitudes.varint()));
+                node.raw_longitude = longitude = add_delta(longitude, zigzag(longitudes.varint()));
+                storage.nodes.push_back(node);
+            }
+            require(latitudes.empty() && longitudes.empty(), "Invalid dense array size");
+        }
+        else
+        {
+            int64_t id = 0;
+            for (const auto& field : dense_fields[0])
+                repeated(field, [&](uint64_t value) {
+                    id = add_delta(id, zigzag(value));
+                    storage.nodes.emplace_back().id = id;
+                });
+            int64_t latitude = 0, longitude = 0;
+            dense_column(1, start, [&](node_t& node, uint64_t value) {
+                node.raw_latitude = latitude = add_delta(latitude, zigzag(value));
+            });
+            dense_column(2, start, [&](node_t& node, uint64_t value) {
+                node.raw_longitude = longitude = add_delta(longitude, zigzag(value));
+            });
+        }
+        if (metadata)
+        {
+            int64_t timestamp = 0, changeset = 0, uid = 0, user = 0;
+            dense_column(4, start, [](node_t& node, uint64_t value) { node.version = narrow(signed_integer(value)); });
+            dense_column(5, start, [&](node_t& node, uint64_t value) {
+                node.timestamp = narrow(timestamp = add_delta(timestamp, zigzag(value)));
+            });
+            dense_column(6, start, [&](node_t& node, uint64_t value) {
+                node.changeset = narrow(changeset = add_delta(changeset, zigzag(value)));
+            });
+            dense_column(7, start, [&](node_t&, uint64_t value) { (void)narrow(uid = add_delta(uid, zigzag(value))); });
+            dense_column(8, start, [&](node_t&, uint64_t value) {
+                (void)string(static_cast<uint64_t>(user = add_delta(user, zigzag(value))));
+            });
+            dense_column(9, start, [](node_t&, uint64_t) {});
+        }
+        storage.node_tags.resize(storage.nodes.size());
+        size_t node_index = start, tag_start = storage.tags.size();
+        std::string_view key;
+        bool has_key = false, has_tags = false;
+        for (const auto& field : dense_fields[3])
+            repeated(field, [&](uint64_t value) {
+                has_tags = true;
+                require(node_index < storage.nodes.size(), "Extra dense node tags");
+                if (has_key)
+                {
+                    storage.tags.push_back({key, string(value)});
+                    has_key = false;
+                }
+                else if (value == 0)
+                {
+                    storage.node_tags[node_index++] = {tag_start, storage.tags.size() - tag_start};
+                    tag_start = storage.tags.size();
+                }
+                else
+                {
+                    key = string(value);
+                    has_key = true;
+                }
+            });
+        require(!has_key, "Missing dense tag value");
+        require(!has_tags || node_index == storage.nodes.size(), "Missing dense tag delimiter");
+    }
+    bool group(bytes_t bytes)
+    {
+        for (auto& fields : dense_fields) fields.clear();
+        unsigned kind = 0;
+        bool has_nodes = false;
+        reader_t reader(bytes);
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            if (field.number >= 1 && field.number <= 4)
+            {
+                require(kind == 0 || kind == field.number, "Mixed entity types in a primitive group");
+                kind = field.number;
+            }
+            switch (field.number)
+            {
+                case 1:
+                    node(field.message());
+                    has_nodes = true;
+                    break;
+                case 2:
+                    collect_dense(field.message());
+                    has_nodes = true;
+                    break;
+                case 3:
+                    way(field.message());
+                    break;
+                case 4:
+                    relation(field.message());
+                    break;
+                case 5:
+                    throw std::runtime_error("Unsupported ChangeSet entity");
+                default:
+                    break;
+            }
+        }
+        if (kind == 2) dense();
+        return has_nodes;
+    }
+    void prepare(bytes_t bytes, size_t index, uint64_t offset)
+    {
+        storage.clear();
+        string_table.clear();
+        groups.clear();
+        block = pbf_block_t{};
+        block.index = index;
+        block.file_offset = offset;
+        bool has_table = false;
+        reader_t reader(bytes);
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            switch (field.number)
+            {
+                case 1: {
+                    has_table = true;
+                    reader_t strings(field.message());
+                    while (!strings.empty())
+                    {
+                        const auto entry = strings.next();
+                        if (entry.number == 1) string_table.push_back(text(entry.message()));
+                    }
+                    break;
+                }
+                case 2:
+                    groups.push_back(field.message());
+                    break;
+                case 17:
+                    block.granularity = narrow(signed_integer(field.integer()));
+                    break;
+                case 18:
+                    block.date_granularity = narrow(signed_integer(field.integer()));
+                    break;
+                case 19:
+                    block.lat_offset = signed_integer(field.integer());
+                    break;
+                case 20:
+                    block.lon_offset = signed_integer(field.integer());
+                    break;
+                default:
+                    break;
+            }
+        }
+        require(has_table && !string_table.empty() && string_table[0].empty(), "Invalid or missing PBF string table");
+        require(block.granularity > 0 && block.date_granularity > 0, "Invalid PBF granularity");
+        block.string_table = string_table;
+    }
+};
 
+struct descriptor_t
+{
+    bytes_t blob;
+    std::string_view type;
+    size_t index = 0;
+    uint64_t offset = 0;
+};
+
+descriptor_t read_descriptor(reader_t& reader, size_t index, uint64_t offset)
+{
+    descriptor_t result;
+    result.index = index;
+    result.offset = offset;
+    const auto prefix = reader.take(4);
+    const auto size = (uint32_t(prefix[0]) << 24) | (uint32_t(prefix[1]) << 16) | (uint32_t(prefix[2]) << 8) |
+                      prefix[3];
+    require(size > 0 && size < max_header_size, "Invalid BlobHeader size");
+    reader_t header(reader.take(size));
+    int32_t blob_size = 0;
+    bool has_type = false, has_size = false;
+    while (!header.empty())
+    {
+        const auto field = header.next();
+        if (field.number == 1)
+        {
+            result.type = text(field.message());
+            has_type = true;
+        }
+        if (field.number == 3)
+        {
+            blob_size = narrow(signed_integer(field.integer()));
+            has_size = true;
+        }
+    }
+    require(has_type && !result.type.empty() && has_size && blob_size >= 0, "Invalid BlobHeader");
+    result.blob = reader.take(static_cast<size_t>(blob_size));
     return result;
 }
 
-struct work_item
+bytes_t blob_data(bytes_t blob, std::vector<uint8_t>& buffer)
 {
-    uint8_t* buffer1 = nullptr;
-    size_t blob_size = 0;
-    bool (*handler)(uint8_t*, uint8_t*) = nullptr;
-    size_t block_index = 0;
-};
-static std::queue<work_item> work_queue;
-static std::mutex mtx_work_queue;
-
-bool handle_blob(work_item& wi) noexcept;
-bool work(size_t index) noexcept
-{
-    while (1)
+    reader_t reader(blob);
+    bytes_t payload;
+    uint32_t encoding = 0;
+    int32_t raw_size = -1;
+    bool has_raw_size = false;
+    while (!reader.empty())
     {
-        input_osm::thread_index = std::min(index, thread_count() - 1);
-        work_item wi;
+        const auto field = reader.next();
+        if (field.number == 2)
         {
-            std::lock_guard<std::mutex> lck(mtx_work_queue);
-            if (work_queue.empty()) return true;
-            wi = work_queue.front();
-            work_queue.pop();
+            raw_size = narrow(signed_integer(field.integer()));
+            has_raw_size = true;
+            require(raw_size >= 0, "Negative uncompressed Blob size");
         }
-        input_osm::block_index = wi.block_index;
-        if (!handle_blob(wi)) return false;
-    }
-    return true;
-}
-
-bool handle_blob(work_item& wi) noexcept
-{
-    // Blob
-    thread_local std::vector<uint8_t> buffer2;
-    uint8_t* zip_ptr = nullptr;
-    uint64_t zip_sz = 0;
-    uint8_t* raw_ptr = nullptr;
-    uint64_t raw_size = 0;
-    iterate_fields(wi.buffer1, wi.buffer1 + wi.blob_size, [&](field_t& field) -> bool {
-        switch (field.key)
+        if (field.number == 1 || (field.number >= 3 && field.number <= 7))
         {
-            case KEY(1, 2): // Raw data
-                raw_size = field.length;
-                raw_ptr = field.pointer;
-                break;
-            case KEY(2, 0): // Raw data size
-                raw_size = field.value_uint64;
-                break;
-            case KEY(3, 2): // zlib_data
-                zip_sz = field.length;
-                zip_ptr = field.pointer;
-                break;
-        }
-        return true;
-    });
-
-    // Decompress the data if necessary.
-    if (zip_ptr && zip_sz && raw_size)
-    {
-        assert(zip_ptr >= wi.buffer1 && zip_ptr < wi.buffer1 + wi.blob_size);
-        assert(zip_ptr + zip_sz <= wi.buffer1 + wi.blob_size);
-        if (buffer2.size() < raw_size) buffer2.resize(raw_size);
-        raw_ptr = buffer2.data();
-        if (!unzip_compressed_block(zip_ptr, zip_sz, raw_ptr, raw_size))
-        {
-            return false;
+            require(encoding == 0, "Multiple Blob encodings");
+            encoding = field.number;
+            payload = field.message();
         }
     }
-
-    // Call the handler with the blob data.
-    bool result = true;
-    if (wi.handler) result = wi.handler(raw_ptr, raw_ptr + raw_size);
-    return result;
-};
-
-bool input_blob_mem(uint8_t*& buffer,
-                    uint8_t* buffer_end,
-                    uint32_t header_size,
-                    const char* expected_type,
-                    bool (*handler)(uint8_t*, uint8_t*),
-                    size_t index) noexcept
-{
-    // Read the BlobHeader.
-    uint8_t* header_buffer = buffer;
-    buffer += header_size;
-    if (buffer > buffer_end) return false;
-
-    // BlobHeader
-    bool expected_header_found = false;
-    uint64_t blob_size = 0;
-    size_t expected_type_len = strlen(expected_type);
-    iterate_fields(header_buffer, header_buffer + header_size, [&](field_t& field) -> bool {
-        switch (field.key)
-        {
-            case KEY(1, 2): // Type
-                expected_header_found = (field.length == expected_type_len) &&
-                                        (memcmp(field.pointer, expected_type, expected_type_len) == 0);
-                break;
-            case KEY(3, 0): // datasize
-                blob_size = field.value_uint64;
-                break;
-        }
-        return true;
-    });
-    if (!expected_header_found || !blob_size) return false;
-
-    // Read the Blob.
-    uint8_t* buffer1 = buffer;
-    buffer += blob_size;
-    if (buffer > buffer_end) return false;
-
-    // Add the blob to the work queue.
-    work_queue.push(work_item{buffer1, blob_size, handler, index});
-    return true;
+    require(encoding == 1 || encoding == 3, "Unsupported or missing Blob encoding");
+    if (encoding == 1)
+    {
+        require(payload.size() < max_raw_size, "PBF raw size limit exceeded");
+        require(!has_raw_size || static_cast<size_t>(raw_size) == payload.size(), "Incorrect raw Blob size");
+        return payload;
+    }
+    require(has_raw_size && static_cast<size_t>(raw_size) < max_raw_size, "Invalid uncompressed Blob size");
+    buffer.resize(std::max<size_t>(1, static_cast<size_t>(raw_size)));
+    uLongf output_size = buffer.size();
+    uLong input_size = payload.size();
+    const int result = uncompress2(buffer.data(), &output_size, payload.data(), &input_size);
+    require(result == Z_OK && output_size == static_cast<size_t>(raw_size) && input_size == payload.size(),
+            "Invalid Zlib Blob data");
+    return {buffer.data(), static_cast<size_t>(raw_size)};
 }
 
-static size_t g_thread_count = 0;
+void validate_header(bytes_t bytes)
+{
+    reader_t reader(bytes);
+    unsigned bbox_present = 0;
+    bool has_bbox = false;
+    while (!reader.empty())
+    {
+        const auto field = reader.next();
+        if (field.number == 4)
+        {
+            const auto feature = text(field.message());
+            if (feature != "OsmSchema-V0.6" && feature != "DenseNodes")
+                throw std::runtime_error("Unsupported required PBF feature: " + std::string(feature));
+        }
+        if (field.number == 1)
+        {
+            has_bbox = true;
+            reader_t bbox(field.message());
+            while (!bbox.empty())
+            {
+                const auto coordinate = bbox.next();
+                if (coordinate.number >= 1 && coordinate.number <= 4)
+                {
+                    (void)coordinate.integer();
+                    bbox_present |= 1u << (coordinate.number - 1);
+                }
+            }
+        }
+    }
+    require(!has_bbox || bbox_present == 15, "Missing PBF bounding box coordinate");
+}
+
+class mapping_t
+{
+public:
+    explicit mapping_t(const char* filename)
+    {
+        require(filename != nullptr, "Null PBF filename");
+        const int fd = open(filename, O_RDONLY | O_CLOEXEC);
+        require(fd >= 0, "Cannot open PBF file");
+        struct stat status{};
+        if (fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0 ||
+            static_cast<uint64_t>(status.st_size) > static_cast<uint64_t>(std::numeric_limits<ptrdiff_t>::max()))
+        {
+            close(fd);
+            throw std::runtime_error("Invalid PBF file size or type");
+        }
+        size_ = static_cast<size_t>(status.st_size);
+        void* address = mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, fd, 0);
+        const int close_result = close(fd);
+        require(address != MAP_FAILED, "Cannot map PBF file");
+        data_ = static_cast<const uint8_t*>(address);
+        if (close_result != 0)
+        {
+            release();
+            throw std::runtime_error("Cannot close PBF file descriptor");
+        }
+    }
+    ~mapping_t() { release(); }
+    mapping_t(const mapping_t&) = delete;
+    mapping_t& operator=(const mapping_t&) = delete;
+    bytes_t bytes() const { return {data_, size_}; }
+    bool release() noexcept
+    {
+        if (!data_) return true;
+        const int result = munmap(const_cast<uint8_t*>(data_), size_);
+        data_ = nullptr;
+        if (result != 0) IOSM_ERROR("Cannot release PBF mapping");
+        return result == 0;
+    }
+
+private:
+    const uint8_t* data_ = nullptr;
+    size_t size_ = 0;
+};
+
+struct context_t
+{
+    bool metadata;
+    pbf_block_handler_t block_handler;
+    std::function<bool(std::span<const node_t>)> nodes;
+    std::function<bool(std::span<const way_t>)> ways;
+    std::function<bool(std::span<const relation_t>)> relations;
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::queue<descriptor_t> queue;
+    bool stopped = false;
+    bool finished = false;
+
+    explicit context_t(bool read_metadata)
+        : metadata(read_metadata)
+    {
+    }
+    void stop()
+    {
+        std::lock_guard lock(mutex);
+        stopped = true;
+        changed.notify_all();
+    }
+    bool active()
+    {
+        std::lock_guard lock(mutex);
+        return !stopped;
+    }
+    template <class Handler, class Data>
+    bool invoke(const Handler& handler, const Data& data)
+    {
+        if (!active()) return false;
+        if (!handler || handler(data)) return true;
+        stop();
+        return false;
+    }
+    bool process(const descriptor_t& descriptor, decoder_t& decoder)
+    {
+        block_index = descriptor.index;
+        try
+        {
+            const auto bytes = blob_data(descriptor.blob, decoder.raw);
+            decoder.prepare(bytes, descriptor.index, descriptor.offset);
+            for (const auto group : decoder.groups)
+            {
+                if (!active()) return false;
+                if (!block_handler) decoder.storage.clear();
+                const bool has_nodes = decoder.group(group);
+                if (block_handler) continue;
+                decoder.storage.finish();
+                if (has_nodes && !invoke(nodes, std::span<const node_t>(decoder.storage.nodes))) return false;
+                if (!invoke(ways, std::span<const way_t>(decoder.storage.ways))) return false;
+                if (!invoke(relations, std::span<const relation_t>(decoder.storage.relations))) return false;
+            }
+            if (!block_handler) return true;
+            decoder.storage.finish();
+            decoder.block.nodes = decoder.storage.nodes;
+            decoder.block.ways = decoder.storage.ways;
+            decoder.block.relations = decoder.storage.relations;
+            return invoke(block_handler, decoder.block);
+        }
+        catch (const std::exception& error)
+        {
+            IOSM_ERROR("PBF block %zu at offset %llu: %s",
+                       descriptor.index,
+                       static_cast<unsigned long long>(descriptor.offset),
+                       error.what());
+        }
+        catch (...)
+        {
+            IOSM_ERROR("PBF block %zu at offset %llu: callback exception",
+                       descriptor.index,
+                       static_cast<unsigned long long>(descriptor.offset));
+        }
+        stop();
+        return false;
+    }
+    void worker(size_t index)
+    {
+        thread_index = index;
+        decoder_t decoder(metadata);
+        for (;;)
+        {
+            descriptor_t descriptor;
+            {
+                std::unique_lock lock(mutex);
+                changed.wait(lock, [&] { return stopped || finished || !queue.empty(); });
+                if (stopped || queue.empty()) return;
+                descriptor = queue.front();
+                queue.pop();
+                changed.notify_all();
+            }
+            if (!process(descriptor, decoder)) return;
+        }
+    }
+};
+
+bool read_file(const char* filename, context_t& context)
+{
+    mapping_t mapping(filename);
+    reader_t reader(mapping.bytes());
+    size_t index = 0;
+    uint64_t offset = 0;
+    auto descriptor = read_descriptor(reader, index++, offset);
+    require(descriptor.type == "OSMHeader", "Missing initial OSMHeader");
+    std::vector<uint8_t> header_buffer;
+    validate_header(blob_data(descriptor.blob, header_buffer));
+    offset = static_cast<uint64_t>(descriptor.blob.data() - mapping.bytes().data()) + descriptor.blob.size();
+    const auto count = thread_count();
+    std::vector<std::thread> workers;
+    decoder_t decoder(context.metadata);
+    try
+    {
+        if (count > 1)
+        {
+            workers.reserve(count);
+            for (size_t i = 0; i < count; ++i) workers.emplace_back([&context, i] { context.worker(i); });
+        }
+        while (!reader.empty() && context.active())
+        {
+            descriptor = read_descriptor(reader, index++, offset);
+            offset = static_cast<uint64_t>(descriptor.blob.data() - mapping.bytes().data()) + descriptor.blob.size();
+            require(descriptor.type != "OSMHeader", "Unexpected second OSMHeader");
+            if (descriptor.type != "OSMData") continue;
+            if (count == 1)
+            {
+                if (!context.process(descriptor, decoder)) break;
+                continue;
+            }
+            std::unique_lock lock(context.mutex);
+            context.changed.wait(lock, [&] { return context.stopped || context.queue.size() < 2 * count; });
+            if (context.stopped) break;
+            context.queue.push(descriptor);
+            context.changed.notify_all();
+        }
+    }
+    catch (const std::exception& error)
+    {
+        IOSM_ERROR("PBF file near block %zu at offset %llu: %s",
+                   index - 1,
+                   static_cast<unsigned long long>(offset),
+                   error.what());
+        context.stop();
+    }
+    catch (...)
+    {
+        IOSM_ERROR("PBF input failure");
+        context.stop();
+    }
+    {
+        std::lock_guard lock(context.mutex);
+        context.finished = true;
+        context.changed.notify_all();
+    }
+    for (auto& worker : workers) worker.join();
+    const bool released = mapping.release();
+    return context.active() && released;
+}
+
+bool run(const char* filename, context_t& context) noexcept
+{
+    thread_index = 0;
+    block_index = 0;
+    file_type = file_type_t::pbf;
+    osc_mode = mode_t::bulk;
+    try
+    {
+        return read_file(filename, context);
+    }
+    catch (const std::exception& error)
+    {
+        IOSM_ERROR("PBF input: %s", error.what());
+    }
+    catch (...)
+    {
+        IOSM_ERROR("PBF input failure");
+    }
+    return false;
+}
+} // namespace
+
 void set_thread_count(size_t count)
 {
-    g_thread_count = std::min(count, static_cast<size_t>(std::thread::hardware_concurrency()));
+    configured_threads = std::min(count, static_cast<size_t>(std::thread::hardware_concurrency()));
 }
 void set_max_thread_count()
 {
-    g_thread_count = std::thread::hardware_concurrency();
+    configured_threads = std::thread::hardware_concurrency();
 }
 size_t thread_count()
 {
-    return g_thread_count ? g_thread_count : 1;
+    return configured_threads ? configured_threads : 1;
 }
 
-bool input_mem(uint8_t* file_begin, size_t file_size) noexcept
+bool input_pbf_blocks(const char* filename, bool read_metadata, pbf_block_handler_t handler) noexcept
 {
-    // Read the file blocks.
+    if (!handler)
     {
-        uint8_t* file_end = file_begin + file_size;
-        uint8_t* buf = file_begin;
-        size_t index = 0;
-        std::locale old_locale;
-
-        IOSM_TRACE("file size is %" PRIu64 " bytes", file_size);
-        IOSM_TRACE("reading block %" PRIu64, index);
-
-        if (buf + 4 > file_end) return false;
-        uint32_t header_size = read_net_uint32(buf);
-        buf += 4;
-        if (!input_blob_mem(buf, file_end, header_size, "OSMHeader", read_header_block, index++)) return false;
-
-        // Data blobs
-        while (buf < file_end)
-        {
-            IOSM_TRACE("reading block %" PRIu64 " offset %" PRId64, index, buf - file_begin);
-            // Header size
-            if (buf + 4 > file_end) break;
-            header_size = read_net_uint32(buf);
-            buf += 4;
-            // OSMData blob
-            if (!input_blob_mem(buf, file_end, header_size, "OSMData", read_primitve_block, index++)) return false;
-        }
-        IOSM_TRACE("block work queue has  %" PRIu64 " items", work_queue.size());
+        IOSM_ERROR("Empty PBF block handler");
+        return false;
     }
-
-    // Process the blobs.
-    if (thread_count() > 1)
+    try
     {
-        // Start the worker threads.
-        std::vector<std::thread> worker_threads(thread_count());
-        for (size_t index{0}; index < thread_count(); index++)
-        {
-            worker_threads[index] = std::thread(work, index);
-        }
-
-        // Wait for all worker threads to stop.
-        for (auto& th : worker_threads)
-        {
-            if (th.joinable()) th.join();
-        }
+        context_t context(read_metadata);
+        context.block_handler = std::move(handler);
+        return run(filename, context);
     }
-    else
+    catch (const std::exception& error)
     {
-        // Call the work function directly when there is only one thread.
-        work(0);
+        IOSM_ERROR("PBF input: %s", error.what());
     }
-
-    return true;
+    catch (...)
+    {
+        IOSM_ERROR("PBF input failure");
+    }
+    return false;
 }
 
 bool input_pbf(const char* filename) noexcept
 {
-    struct stat mmapstat;
-    if (stat(filename, &mmapstat) == -1)
+    try
     {
-        IOSM_ERROR("Failed stat: %s", strerror(errno));
-        return false;
+        context_t context(decode_metadata);
+        context.nodes = node_handler;
+        context.ways = way_handler;
+        context.relations = relation_handler;
+        return run(filename, context);
     }
-    int fd;
-    if ((fd = open(filename, O_RDONLY)) == -1)
+    catch (const std::exception& error)
     {
-        IOSM_ERROR("Failed open: %s", strerror(errno));
-        return false;
+        IOSM_ERROR("PBF input: %s", error.what());
     }
-    uint8_t* file_data = (uint8_t*)mmap((caddr_t)0, mmapstat.st_size, PROT_READ, MAP_SHARED, fd, 0);
-    close(fd);
-    if ((caddr_t)file_data == (caddr_t)(-1))
+    catch (...)
     {
-        IOSM_ERROR("Failed mmap: %s", strerror(errno));
-        return false;
+        IOSM_ERROR("PBF input failure");
     }
-    bool result = input_mem(file_data, mmapstat.st_size);
-    if (munmap(file_data, mmapstat.st_size) == -1)
-    {
-        IOSM_ERROR("Failed munmap: %s", strerror(errno));
-        return false;
-    }
-    return result;
+    return false;
 }
-
 } // namespace input_osm

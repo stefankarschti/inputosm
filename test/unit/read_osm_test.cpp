@@ -76,7 +76,7 @@ int main()
     const bool parse_ok = input_osm::input_file(
         data_path.string().c_str(),
         true,
-        [&nodes](input_osm::span_t<input_osm::node_t> batch) {
+        [&nodes](std::span<const input_osm::node_t> batch) {
             for (const auto& node : batch)
             {
                 NodeData& copy = nodes.emplace_back();
@@ -88,12 +88,12 @@ int main()
                 copy.changeset = node.changeset;
                 for (const auto& tag : node.tags)
                 {
-                    if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
+                    copy.tags.emplace(tag.key, tag.value);
                 }
             }
             return true;
         },
-        [&ways](input_osm::span_t<input_osm::way_t> batch) {
+        [&ways](std::span<const input_osm::way_t> batch) {
             for (const auto& way : batch)
             {
                 WayData& copy = ways.emplace_back();
@@ -104,12 +104,12 @@ int main()
                 copy.refs.assign(way.node_refs.begin(), way.node_refs.end());
                 for (const auto& tag : way.tags)
                 {
-                    if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
+                    copy.tags.emplace(tag.key, tag.value);
                 }
             }
             return true;
         },
-        [&relations](input_osm::span_t<input_osm::relation_t> batch) {
+        [&relations](std::span<const input_osm::relation_t> batch) {
             for (const auto& relation : batch)
             {
                 RelationData& copy = relations.emplace_back();
@@ -123,11 +123,11 @@ int main()
                     RelationMemberData& member_copy = copy.members.emplace_back();
                     member_copy.type = member.type;
                     member_copy.ref = member.id;
-                    if (member.role) member_copy.role = member.role;
+                    member_copy.role = member.role;
                 }
                 for (const auto& tag : relation.tags)
                 {
-                    if (tag.key && tag.value) copy.tags.emplace(tag.key, tag.value);
+                    copy.tags.emplace(tag.key, tag.value);
                 }
             }
             return true;

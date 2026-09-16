@@ -42,7 +42,7 @@ int main(int argc, char **argv)
             path,
             read_metadata,
             [&node_count_by_lat,
-             actual_thread_count = input_osm::thread_count()](input_osm::span_t<input_osm::node_t> node_list) -> bool {
+             actual_thread_count = input_osm::thread_count()](std::span<const input_osm::node_t> node_list) -> bool {
                 for (auto &n : node_list)
                 {
                     ++node_count_by_lat[input_osm::thread_index * actual_thread_count + std::abs(n.raw_latitude / 1e7)];

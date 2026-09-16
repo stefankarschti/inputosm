@@ -22,9 +22,9 @@ namespace input_osm
 {
 
 bool decode_metadata;
-std::function<bool(span_t<node_t>)> node_handler;
-std::function<bool(span_t<way_t>)> way_handler;
-std::function<bool(span_t<relation_t>)> relation_handler;
+std::function<bool(std::span<const node_t>)> node_handler;
+std::function<bool(std::span<const way_t>)> way_handler;
+std::function<bool(std::span<const relation_t>)> relation_handler;
 mode_t osc_mode;
 thread_local size_t thread_index{0};
 thread_local size_t block_index{0};
@@ -36,14 +36,14 @@ bool input_xml(const char* filename);
 
 bool input_file(const char* filename,
                 bool decode_metadata,
-                std::function<bool(span_t<node_t>)> node_handler,
-                std::function<bool(span_t<way_t>)> way_handler,
-                std::function<bool(span_t<relation_t>)> relation_handler) noexcept
+                std::function<bool(std::span<const node_t>)> node_handler,
+                std::function<bool(std::span<const way_t>)> way_handler,
+                std::function<bool(std::span<const relation_t>)> relation_handler) noexcept
 {
     input_osm::decode_metadata = decode_metadata;
     input_osm::node_handler = std::move(node_handler);
-    input_osm::way_handler = way_handler;
-    input_osm::relation_handler = relation_handler;
+    input_osm::way_handler = std::move(way_handler);
+    input_osm::relation_handler = std::move(relation_handler);
     input_osm::osc_mode = mode_t::bulk;
     input_osm::file_type = file_type_t::xml;
     input_osm::thread_index = 0;

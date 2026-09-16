@@ -13,7 +13,7 @@ The XML reader uses the thread that calls `input_file()`.
 1. Features
 2. Start
 3. Build and install
-4. Use Conan
+4. Conan usage
 5. CMake options
 6. API description
 7. Examples
@@ -56,9 +56,9 @@ int main(int argc, char** argv) {
     bool ok = input_osm::input_file(
         file,
         read_meta,
-        [&node_total](input_osm::span_t<input_osm::node_t> nodes){ node_total += nodes.size(); return true; },
-        [&way_total](input_osm::span_t<input_osm::way_t> ways){ way_total += ways.size(); return true; },
-        [&rel_total](input_osm::span_t<input_osm::relation_t> rels){ rel_total += rels.size(); return true; }
+        [&node_total](std::span<const input_osm::node_t> nodes){ node_total += nodes.size(); return true; },
+        [&way_total](std::span<const input_osm::way_t> ways){ way_total += ways.size(); return true; },
+        [&rel_total](std::span<const input_osm::relation_t> rels){ rel_total += rels.size(); return true; }
     );
 
     if(!ok) { std::cerr << "Parse failed\n"; return 2; }
@@ -96,7 +96,7 @@ The supplied `count_all` example uses multiple threads and a different counter f
 - CMake version 3.16 or a subsequent version
 - A C++20 compiler
 - An operating system with the POSIX interfaces that the source files use
-- Expat and Zlib
+- Expat and Zlib version 1.2.9 or a subsequent version
 - clang-tidy, unless `ENABLE_CLANG_TIDY` is `OFF`
 
 ### Build the library
@@ -150,7 +150,7 @@ To get the compiler and linker options with pkg-config, use this command:
 pkg-config --cflags --libs inputosm
 ```
 
-## 4. Use Conan
+## 4. Conan usages
 
 Conan can get the Expat and Zlib dependencies.
 
@@ -202,11 +202,11 @@ The `node_t`, `way_t`, and `relation_t` structures each occupy a maximum of 64 b
 Their spans refer to memory for tags, node references, and relation members.
 This memory is not part of the structures.
 
-- `node_t { int64_t id; int64_t raw_latitude; int64_t raw_longitude; span_t<tag_t> tags; int32_t version; int32_t timestamp; int32_t changeset; }`
-- `way_t { int64_t id; span_t<int64_t> node_refs; span_t<tag_t> tags; int32_t version; int32_t timestamp; int32_t changeset; }`
-- `relation_t { int64_t id; span_t<relation_member_t> members; span_t<tag_t> tags; int32_t version; int32_t timestamp; int32_t changeset; }`
-- `tag_t { const char* key; const char* value; }`
-- `relation_member_t { uint8_t type; int64_t id; const char* role; }`
+- `node_t { int64_t id; int64_t raw_latitude; int64_t raw_longitude; std::span<const tag_t> tags; int32_t version; int32_t timestamp; int32_t changeset; }`
+- `way_t { int64_t id; std::span<const int64_t> node_refs; std::span<const tag_t> tags; int32_t version; int32_t timestamp; int32_t changeset; }`
+- `relation_t { int64_t id; std::span<const relation_member_t> members; std::span<const tag_t> tags; int32_t version; int32_t timestamp; int32_t changeset; }`
+- `tag_t { std::string_view key; std::string_view value; }`
+- `relation_member_t { uint8_t type; int64_t id; std::string_view role; }`
 
 A relation member has type `0` for a node, `1` for a way, or `2` for a relation.
 
@@ -214,12 +214,64 @@ A relation member has type `0` for a node, `1` for a way, or `2` for a relation.
 
 Use `input_file()` with a path, a metadata option, and three handlers.
 A handler is a callback for one entity type.
-Each handler has the type `std::function<bool(span_t<T>)>` for its entity type `T`.
+Each handler has the type `std::function<bool(std::span<const T>)>` for its entity type `T`.
 A handler returns `true` to continue.
 Refer to section 11 for the limits on cancellation.
 
 The `decode_metadata` option controls PBF metadata decoding.
 This option does not change how the XML reader reads metadata attributes.
+
+### Read complete PBF blocks
+
+Use `input_pbf_blocks()` for one callback per `OSMData` block.
+The callback receives all nodes, ways, relations, and string table entries from that block.
+The Boolean result is `true` on completion and `false` on cancellation or error.
+The function reads PBF content without a filename extension check.
+
+```cpp
+input_osm::set_thread_count(1);
+const bool ok = input_osm::input_pbf_blocks(
+    "map.osm.pbf", false,
+    [](const input_osm::pbf_block_t& block) {
+        for (const auto& way : block.ways)
+            for (const auto& tag : way.tags)
+                if (tag.key == "route" && tag.value == "ferry")
+                    std::cout << way.id << '\n';
+        return true;
+    });
+```
+
+The `count_blocks` integration example counts blocks and entities.
+`block.index` is the file block ordinal, including the initial header at index zero.
+`block.file_offset` identifies the four-byte length field in the input file.
+The block also exposes `granularity`, `lat_offset`, `lon_offset`, and `date_granularity`.
+
+Both PBF APIs use string views directly into raw or decompressed block bytes.
+A complete block callback also receives `std::span<const std::string_view> string_table`.
+This span preserves table indexes, duplicates, empty strings, and unused entries.
+A missing or invalid table causes an error before the block callback.
+The reader supports raw and Zlib Blobs, ordinary nodes, and dense nodes.
+It rejects unsupported required features, including historical visibility.
+
+With one thread, callbacks run in file order in the calling thread.
+With multiple threads, callbacks can overlap and finish in a different order.
+Refer to the [block API design](docs/pbf-block-callback-proposal.md) for the complete contract.
+
+### Migrate to version 0.2.0
+
+This version changes source and binary interfaces.
+Rebuild dependent applications with the new headers and library.
+
+- Replace the custom span with `std::span<const T>` in entity handlers.
+- Include `<span>` instead of the removed `inputosm/span.h` header.
+- Replace C-string comparisons with string view comparisons.
+- Use `.size()` instead of `strlen()` for tag values and relation roles.
+- Copy a view into `std::string` when an application needs owned text.
+- Preserve empty tag values when removing old pointer checks.
+
+`input_file()` retains its three entity handlers and Boolean return value.
+PBF stop requests and worker failures now reach the caller as `false`.
+XML and OSC use the same public entity types with views into temporary owned strings.
 
 ### Configure threads and logs
 
@@ -242,7 +294,7 @@ The callback type is `void (*)(log_level_t, const char*)`.
 Use the spans and their data only during the callback that receives them.
 This limit includes tag strings and relation roles.
 To use data after the callback returns, copy the data into memory that your application owns.
-A copy of a structure alone does not copy the data to which its spans and pointers refer.
+A copy of a structure alone does not copy the data to which its spans and string views refer.
 
 ### Concurrent access
 
@@ -252,7 +304,7 @@ If threads share data, use synchronization to prevent concurrent changes.
 Use `thread_index` to select the array or vector entry for this thread.
 
 The library also uses global configuration and parser state.
-Do not call `input_file()` from different threads at the same time.
+Do not run concurrent or recursive input operations with either input API.
 Set the thread configuration and log configuration before you read a file.
 
 ### Internal time functions
@@ -339,7 +391,7 @@ The counter types are in `test/integration/counter.h`.
              &node_timestamp,
              &block_index,
              &node_with_tags_count,
-             &max_node_id](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool {
+             &max_node_id](std::span<const input_osm::node_t> node_list) noexcept -> bool {
                 auto cnt = node_list.size();
                 node_count[input_osm::thread_index] += cnt;
                 if (cnt > max_node_count[input_osm::thread_index]) max_node_count[input_osm::thread_index] = cnt;
@@ -366,7 +418,7 @@ The counter types are in `test/integration/counter.h`.
              &way_timestamp,
              &block_index,
              &ways_with_tags_count,
-             &max_way_id](input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool {
+             &max_way_id](std::span<const input_osm::way_t> way_list) noexcept -> bool {
                 auto cnt = way_list.size();
                 way_count[input_osm::thread_index] += cnt;
                 if (cnt > max_way_count[input_osm::thread_index]) max_way_count[input_osm::thread_index] = cnt;
@@ -395,7 +447,7 @@ The counter types are in `test/integration/counter.h`.
              &relation_timestamp,
              &block_index,
              &relations_with_tags_count,
-             &max_relation_id](input_osm::span_t<input_osm::relation_t> relation_list) noexcept -> bool {
+             &max_relation_id](std::span<const input_osm::relation_t> relation_list) noexcept -> bool {
                 auto cnt = relation_list.size();
                 relation_count[input_osm::thread_index] += cnt;
                 if (cnt > max_relation_count[input_osm::thread_index])
@@ -529,10 +581,10 @@ File input, decompression, and callbacks can limit throughput.
 ### PBF reader
 
 1. The reader maps the file into memory.
-2. The reader adds file blocks to a work queue.
+2. The reader checks the header before it adds data blocks to a bounded work queue.
 3. Worker threads get blocks from the queue and decompress the data when necessary.
 4. Each worker decodes entities into vectors for that thread.
-5. Each worker calls the handlers with spans of entities.
+5. Each worker calls entity handlers or one handler for the complete decoded block.
 
 ### XML reader
 
@@ -549,13 +601,18 @@ Refer to section 11 for coordinate conversion.
 ### How do I stop before the end of a file?
 
 Return `false` from a handler to tell the reader to stop.
-This result does not guarantee that all PBF workers stop or that `input_file()` returns `false`.
-Do not use the return value alone to identify cancellation.
+For PBF input, both APIs return `false` after a stop request or an error.
+All workers stop before the input function returns.
+Callbacks with prior permission can still finish during cancellation.
+With one thread, no subsequent callback runs after a stop request.
+The Boolean result does not distinguish cancellation from an error.
 
 ### Do tag strings end with a null character?
 
-Yes. Tag strings end with a null character.
-Use these strings only during the callback.
+Tag fields and relation roles use `std::string_view` without a null-termination guarantee.
+Use view comparisons and `.size()` to read their contents.
+Do not pass `.data()` alone to a function that requires a C string.
+Use these views only during the callback.
 
 ### How do I convert raw coordinates to degrees?
 

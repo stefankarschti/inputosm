@@ -76,7 +76,7 @@ int main(int argc, char **argv)
              &node_timestamp,
              &block_index,
              &node_with_tags_count,
-             &max_node_id](input_osm::span_t<input_osm::node_t> node_list) noexcept -> bool {
+             &max_node_id](std::span<const input_osm::node_t> node_list) noexcept -> bool {
                 auto cnt = node_list.size();
                 node_count[input_osm::thread_index] += cnt;
                 if (cnt > max_node_count[input_osm::thread_index]) max_node_count[input_osm::thread_index] = cnt;
@@ -103,7 +103,7 @@ int main(int argc, char **argv)
              &way_timestamp,
              &block_index,
              &ways_with_tags_count,
-             &max_way_id](input_osm::span_t<input_osm::way_t> way_list) noexcept -> bool {
+             &max_way_id](std::span<const input_osm::way_t> way_list) noexcept -> bool {
                 auto cnt = way_list.size();
                 way_count[input_osm::thread_index] += cnt;
                 if (cnt > max_way_count[input_osm::thread_index]) max_way_count[input_osm::thread_index] = cnt;
@@ -132,7 +132,7 @@ int main(int argc, char **argv)
              &relation_timestamp,
              &block_index,
              &relations_with_tags_count,
-             &max_relation_id](input_osm::span_t<input_osm::relation_t> relation_list) noexcept -> bool {
+             &max_relation_id](std::span<const input_osm::relation_t> relation_list) noexcept -> bool {
                 auto cnt = relation_list.size();
                 relation_count[input_osm::thread_index] += cnt;
                 if (cnt > max_relation_count[input_osm::thread_index])

@@ -44,12 +44,12 @@ int main(int argc, char **argv)
             path,
             false,
             nullptr,
-            [&ferry_count, &ferry](input_osm::span_t<input_osm::way_t> way_list) -> bool {
+            [&ferry_count, &ferry](std::span<const input_osm::way_t> way_list) -> bool {
                 for (auto &way : way_list)
                 {
                     for (auto &tag : way.tags)
                     {
-                        if (strcmp(tag.key, "route") == 0 && strcmp(tag.value, "ferry") == 0)
+                        if (tag.key == "route" && tag.value == "ferry")
                         {
                             ferry_count[input_osm::thread_index]++;
                             ferry[input_osm::thread_index].emplace_back(ferry_info{
@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     if (!input_osm::input_file(
             path,
             false,
-            [&node_coord](input_osm::span_t<input_osm::node_t> node_list) -> bool {
+            [&node_coord](std::span<const input_osm::node_t> node_list) -> bool {
                 for (auto &node : node_list)
                 {
                     auto it = node_coord.find(node.id);
