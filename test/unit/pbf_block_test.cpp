@@ -466,6 +466,47 @@ void column_test(files_t& files)
     } while (std::next_permutation(order.begin(), order.end()));
 }
 
+void dense_limits_test(files_t& files)
+{
+    set_thread_count(1);
+    const auto maximum = std::numeric_limits<int64_t>::max();
+    const auto minimum = std::numeric_limits<int64_t>::min();
+    const auto dense = packed(9, {0, sint(maximum), sint(-maximum)}) +
+                       packed(1, {sint(maximum), sint(-maximum), sint(minimum)}) +
+                       packed(8, {sint(minimum), sint(maximum), sint(1)});
+    const auto empty = packed(1, {}) + packed(8, {}) + packed(9, {});
+    const auto zero = packed(1, {0}) + packed(8, {0}) + packed(9, {0});
+    const auto path = files.write(header() +
+                                  raw_block("OSMData",
+                                            table({""}) + message(2, message(2, empty)) +
+                                                message(2, message(2, dense)) + message(2, message(2, zero))));
+    for (bool metadata : {false, true})
+    {
+        size_t count = 0;
+        auto nodes = [&](std::span<const node_t> nodes) {
+            const std::array<int64_t, 4> ids{maximum, 0, minimum, 0};
+            const std::array<int64_t, 4> latitudes{minimum, -1, 0, 0};
+            const std::array<int64_t, 4> longitudes{0, maximum, 0, 0};
+            for (const auto& node : nodes)
+            {
+                CHECK(count < ids.size());
+                CHECK(node.id == ids[count]);
+                CHECK(node.raw_latitude == latitudes[count]);
+                CHECK(node.raw_longitude == longitudes[count]);
+                CHECK(node.tags.empty());
+                CHECK(node.version == 0 && node.timestamp == 0 && node.changeset == 0);
+                ++count;
+            }
+            return true;
+        };
+        CHECK(input_pbf_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) { return nodes(block.nodes); }));
+        CHECK(count == 4);
+        count = 0;
+        CHECK(input_file(path.c_str(), metadata, nodes, {}, {}));
+        CHECK(count == 4);
+    }
+}
+
 void growth_test(files_t& files)
 {
     const std::string long_string(8192, 'x');
@@ -667,10 +708,24 @@ void column_error_test(files_t& files)
         reject(message(3, integer(1, 1) + deltas));
     for (uint32_t column : {1, 8, 9})
     {
-        std::string dense = packed(column, {sint(maximum)}) + integer(column, sint(1));
-        for (uint32_t other : {1, 8, 9})
-            if (other != column) dense += packed(other, {0, 0});
-        reject(message(2, dense));
+        for (const auto& deltas : {packed(column, {sint(maximum)}) + integer(column, sint(1)),
+                                   packed(column, {sint(minimum)}) + integer(column, sint(-1)),
+                                   packed(column, {sint(maximum), sint(1)}),
+                                   packed(column, {sint(minimum), sint(-1)})})
+        {
+            std::string dense = deltas;
+            for (uint32_t other : {1, 8, 9})
+                if (other != column) dense += packed(other, {0, 0});
+            for (bool metadata : {false, true}) reject(message(2, dense), metadata);
+        }
+        for (const auto& invalid :
+             {std::string(1, static_cast<char>(0x80)), std::string(9, static_cast<char>(0xff)) + "\2"})
+        {
+            std::string dense = message(column, invalid);
+            for (uint32_t other : {1, 8, 9})
+                if (other != column) dense += packed(other, {0});
+            for (bool metadata : {false, true}) reject(message(2, dense), metadata);
+        }
     }
     reject(message(
         4, integer(1, 1) + packed(10, {0, 0}) + packed(8, {0, 0}) + packed(9, {sint(minimum)}) + integer(9, sint(-1))));
@@ -826,6 +881,7 @@ int main()
             }
         layout_test(files);
         column_test(files);
+        dense_limits_test(files);
         growth_test(files);
         error_test(files);
         column_error_test(files);

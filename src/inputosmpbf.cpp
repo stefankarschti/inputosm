@@ -493,19 +493,41 @@ struct decoder_t
     void dense()
     {
         const size_t start = storage.nodes.size();
-        int64_t id = 0;
-        for (const auto& field : dense_fields[0])
-            repeated(field, [&](uint64_t value) {
-                id = add_delta(id, zigzag(value));
-                storage.nodes.emplace_back().id = id;
+        const bool single_packed = dense_fields[0].size() == 1 && dense_fields[1].size() == 1 &&
+                                   dense_fields[2].size() == 1 && dense_fields[0][0].wire == 2 &&
+                                   dense_fields[1][0].wire == 2 && dense_fields[2][0].wire == 2;
+        if (single_packed)
+        {
+            reader_t ids(dense_fields[0][0].message()), latitudes(dense_fields[1][0].message()),
+                     longitudes(dense_fields[2][0].message());
+            int64_t id = 0, latitude = 0, longitude = 0;
+            while (!ids.empty())
+            {
+                require(!latitudes.empty() && !longitudes.empty(), "Invalid dense array size");
+                node_t node;
+                node.id = id = add_delta(id, zigzag(ids.varint()));
+                node.raw_latitude = latitude = add_delta(latitude, zigzag(latitudes.varint()));
+                node.raw_longitude = longitude = add_delta(longitude, zigzag(longitudes.varint()));
+                storage.nodes.push_back(node);
+            }
+            require(latitudes.empty() && longitudes.empty(), "Invalid dense array size");
+        }
+        else
+        {
+            int64_t id = 0;
+            for (const auto& field : dense_fields[0])
+                repeated(field, [&](uint64_t value) {
+                    id = add_delta(id, zigzag(value));
+                    storage.nodes.emplace_back().id = id;
+                });
+            int64_t latitude = 0, longitude = 0;
+            dense_column(1, start, [&](node_t& node, uint64_t value) {
+                node.raw_latitude = latitude = add_delta(latitude, zigzag(value));
             });
-        int64_t latitude = 0, longitude = 0;
-        dense_column(1, start, [&](node_t& node, uint64_t value) {
-            node.raw_latitude = latitude = add_delta(latitude, zigzag(value));
-        });
-        dense_column(2, start, [&](node_t& node, uint64_t value) {
-            node.raw_longitude = longitude = add_delta(longitude, zigzag(value));
-        });
+            dense_column(2, start, [&](node_t& node, uint64_t value) {
+                node.raw_longitude = longitude = add_delta(longitude, zigzag(value));
+            });
+        }
         if (metadata)
         {
             int64_t timestamp = 0, changeset = 0, uid = 0, user = 0;
