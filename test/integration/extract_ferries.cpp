@@ -12,6 +12,7 @@
 // limitations under the License.
 
 #include <inputosm/inputosm.h>
+#include <fmt/format.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,13 +25,13 @@ int main(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage %s <path-to-pbf>\n", argv[0]);
+        fmt::print("Usage {} <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
     const char *path = argv[1];
 
     input_osm::set_max_thread_count();
-    printf("running on %zu threads\n", input_osm::thread_count());
+    fmt::print("running on {} threads\n", fmt::group_digits(input_osm::thread_count()));
 
     std::vector<uint64_t> ferry_count(input_osm::thread_count(), 0);
     struct ferry_info
@@ -62,11 +63,11 @@ int main(int argc, char **argv)
             },
             nullptr))
     {
-        printf("Error while processing pbf\n");
+        fmt::print("Error while processing pbf\n");
         return EXIT_FAILURE;
     }
 
-    printf("%llu ferries\n", std::accumulate(ferry_count.begin(), ferry_count.end(), 0LLU));
+    fmt::print("{} ferries\n", fmt::group_digits(std::accumulate(ferry_count.begin(), ferry_count.end(), 0LLU)));
     struct pos
     {
         int64_t raw_longitude;
@@ -83,8 +84,8 @@ int main(int argc, char **argv)
             }
         }
     }
-    printf("%zu unique nodes used by ferries\n", node_coord.size());
-    printf("retrieving ferry node coordinates...\n");
+    fmt::print("{} unique nodes used by ferries\n", fmt::group_digits(node_coord.size()));
+    fmt::print("retrieving ferry node coordinates...\n");
     if (!input_osm::input_file(
             path,
             false,
@@ -102,10 +103,10 @@ int main(int argc, char **argv)
             nullptr,
             nullptr))
     {
-        printf("Error while processing pbf\n");
+        fmt::print("Error while processing pbf\n");
         return EXIT_FAILURE;
     }
-    printf("done.\n");
+    fmt::print("done.\n");
 
     return EXIT_SUCCESS;
 }

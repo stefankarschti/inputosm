@@ -3,12 +3,13 @@
 #include <cstdlib>
 #include <cstdio>
 #include <ctime>
+#include <fmt/chrono.h>
 
 int main(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage %s <path-to-pbf>\n", argv[0]);
+        fmt::print("Usage {} <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -29,11 +30,11 @@ int main(int argc, char **argv)
 
         struct timespec ts;
         timespec_get(&ts, TIME_UTC);
-        char time_buf[100];
-        size_t rc = strftime(time_buf, sizeof(time_buf), "%D %T", gmtime(&ts.tv_sec));
-        snprintf(time_buf + rc, sizeof(time_buf) - rc, ".%06ld UTC", ts.tv_nsec / 1000);
-
-        printf("%s [%s]: %s\n", time_buf, lvl_to_str(level), message);
+        fmt::print("{:%m/%d/%y %T}.{:06} UTC [{}]: {}\n",
+                   fmt::gmtime(ts.tv_sec),
+                   ts.tv_nsec / 1000,
+                   lvl_to_str(level),
+                   message);
     };
 
     input_osm::set_log_level(input_osm::LOG_LEVEL_TRACE);

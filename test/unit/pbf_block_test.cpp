@@ -6,7 +6,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <iostream>
+#include <fmt/format.h>
+#include <cstdio>
 #include <limits>
 #include <mutex>
 #include <thread>
@@ -23,7 +24,7 @@ void check(bool condition, const char* expression, int line)
 {
     if (!condition)
     {
-        std::cerr << "Check failed at line " << line << ": " << expression << '\n';
+        fmt::print(stderr, "Check failed at line {}: {}\n", line, expression);
         throw std::runtime_error(expression);
     }
 }
@@ -957,12 +958,12 @@ int main()
         column_error_test(files);
         reader_boundary_test(files);
         cancellation_test(files);
-        std::cout << "PBF tests passed\n";
+        fmt::print("PBF tests passed\n");
         return EXIT_SUCCESS;
     }
     catch (const std::exception& error)
     {
-        std::cerr << error.what() << '\n';
+        fmt::print(stderr, "{}\n", error.what());
         return EXIT_FAILURE;
     }
 }

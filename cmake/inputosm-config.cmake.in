@@ -4,6 +4,7 @@ include(CMakeFindDependencyMacro)
 find_dependency(EXPAT)
 find_dependency(libdeflate 1.26 CONFIG)
 find_dependency(Threads)
+find_dependency(fmt 12.2.0 CONFIG)
 
 include(${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@-targets.cmake)
 check_required_components(@PROJECT_NAME@)

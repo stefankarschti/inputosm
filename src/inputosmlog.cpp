@@ -1,7 +1,5 @@
 #include "inputosmlog.h"
 
-#include <cstdarg>
-#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 
@@ -9,20 +7,20 @@ constexpr const char* kError = "err";
 constexpr const char* kInfo = "inf";
 constexpr const char* kTrace = "trc";
 
-// This default log callback uses printf. The user can replace it.
+// This default log callback uses fmt. The user can replace it.
 // The callback must be thread-safe. Output from different threads can be mixed.
 // Do not add other shared data without synchronization.
 static input_osm::log_callback_t g_default_log_callback = [](input_osm::log_level_t lvl, const char* message) {
     switch (lvl)
     {
         case input_osm::log_level_t::LOG_LEVEL_TRACE:
-            printf("[%s]: %s\n", kTrace, message);
+            fmt::print("[{}]: {}\n", kTrace, message);
             return;
         case input_osm::log_level_t::LOG_LEVEL_INFO:
-            printf("[%s]: %s\n", kInfo, message);
+            fmt::print("[{}]: {}\n", kInfo, message);
             return;
         case input_osm::log_level_t::LOG_LEVEL_ERROR:
-            printf("[%s]: %s\n", kError, message);
+            fmt::print("[{}]: {}\n", kError, message);
             return;
         default:
             return;
@@ -62,25 +60,6 @@ bool set_log_callback(log_callback_t log_callback) noexcept
     }
     g_log_callback = log_callback;
     return true;
-}
-
-void log(log_level_t level, const char* fmt, ...) noexcept
-{
-    if (level < g_log_level)
-    {
-        return;
-    }
-
-    static constexpr int k_buffer_size = 1 << 9;
-    char buffer[k_buffer_size];
-    va_list args;
-    va_start(args, fmt);
-
-    vsnprintf(buffer, k_buffer_size, fmt, args);
-
-    va_end(args);
-
-    g_log_callback(level, buffer);
 }
 
 } // namespace input_osm

@@ -2,13 +2,14 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
+#include <fmt/format.h>
+#include <cstdio>
 
 int main(int argc, char** argv)
 {
     if (argc != 2)
     {
-        std::cerr << "Usage: count_blocks <file.osm.pbf>\n";
+        fmt::print(stderr, "Usage: count_blocks <file.osm.pbf>\n");
         return EXIT_FAILURE;
     }
 
@@ -28,10 +29,14 @@ int main(int argc, char** argv)
 
     if (!result)
     {
-        std::cerr << "Input did not complete\n";
+        fmt::print(stderr, "Input did not complete\n");
         return EXIT_FAILURE;
     }
 
-    std::cout << "blocks=" << blocks << " nodes=" << nodes << " ways=" << ways << " relations=" << relations << '\n';
+    fmt::print("blocks={} nodes={} ways={} relations={}\n",
+               fmt::group_digits(blocks),
+               fmt::group_digits(nodes),
+               fmt::group_digits(ways),
+               fmt::group_digits(relations));
     return EXIT_SUCCESS;
 }
