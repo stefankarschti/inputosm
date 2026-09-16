@@ -8,5 +8,6 @@ Description: Read OSM files.
 URL: https://bitbucket.org/snake77212/@LIBRARY_NAME@
 Version: @PROJECT_VERSION@
 CFlags: -I${includedir}
-Libs: -L${libdir} --linputosm -lz -lexpat
+Libs: -L${libdir} -linputosm -lz -lexpat
 Requires:
+Requires.private: fmt >= 12.2.0

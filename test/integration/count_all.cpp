@@ -15,7 +15,8 @@
 
 #include <inputosm/inputosm.h>
 
-#include <iostream>
+#include <fmt/format.h>
+#include <cstdio>
 #include <cstdint>
 #include <numeric>
 #include <vector>
@@ -25,18 +26,18 @@ int main(int argc, char** argv)
 {
     if (argc < 2)
     {
-        std::cerr << "Usage" << argv[0] << "<path-to-pbf> [read-metadata]\n";
+        fmt::print(stderr, "Usage{}<path-to-pbf> [read-metadata]\n", argv[0]);
         return EXIT_FAILURE;
     }
     const char* path = argv[1];
-    std::cout << path << "\n";
+    fmt::print("{}\n", path);
     bool read_metadata = (argc >= 3);
-    if (read_metadata) std::cout << "reading metadata\n";
+    if (read_metadata) fmt::print("reading metadata\n");
     input_osm::set_max_thread_count();
 
     const size_t actual_thread_count = input_osm::thread_count();
 
-    std::cout << "running on " << actual_thread_count << " threads\n";
+    fmt::print("running on {} threads\n", fmt::group_digits(actual_thread_count));
 
     // Allocate memory for all counters in one operation.
     std::vector<input_osm::Counter<uint64_t>> all_counters(3 * actual_thread_count);
@@ -63,14 +64,14 @@ int main(int argc, char** argv)
                 return true;
             }))
     {
-        std::cerr << "Error while processing pbf\n";
+        fmt::print(stderr, "Error while processing pbf\n");
         return EXIT_FAILURE;
     }
 
-    std::cout.imbue(std::locale(""));
-    std::cout << "nodes: " << std::accumulate(node_count.begin(), node_count.end(), 0LLU) << "\n";
-    std::cout << "ways: " << std::accumulate(way_count.begin(), way_count.end(), 0LLU) << "\n";
-    std::cout << "relations: " << std::accumulate(relation_count.begin(), relation_count.end(), 0LLU) << "\n";
+    fmt::print("nodes: {}\n", fmt::group_digits(std::accumulate(node_count.begin(), node_count.end(), 0LLU)));
+    fmt::print("ways: {}\n", fmt::group_digits(std::accumulate(way_count.begin(), way_count.end(), 0LLU)));
+    fmt::print("relations: {}\n",
+               fmt::group_digits(std::accumulate(relation_count.begin(), relation_count.end(), 0LLU)));
 
     return EXIT_SUCCESS;
 }

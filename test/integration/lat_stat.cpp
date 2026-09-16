@@ -15,8 +15,10 @@
 
 #include <inputosm/inputosm.h>
 
-#include <iostream>
-#include <iomanip>
+#include <fmt/format.h>
+#include <cstdio>
+#include <cmath>
+#include <algorithm>
 #include <cstdint>
 #include <numeric>
 #include <vector>
@@ -25,14 +27,14 @@ int main(int argc, char **argv)
 {
     if (argc < 2)
     {
-        std::cerr << "Usage" << argv[0] << "<path-to-pbf>\n";
+        fmt::print(stderr, "Usage{}<path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
     const char *path = argv[1];
-    std::cout << path << "\n";
+    fmt::print("{}\n", path);
     bool read_metadata = false;
     input_osm::set_max_thread_count();
-    std::cout << "running on " << input_osm::thread_count() << " threads\n";
+    fmt::print("running on {} threads\n", fmt::group_digits(input_osm::thread_count()));
 
     // Allocate memory for all counters in one operation.
     constexpr unsigned total_lat_degree_values = 91;
@@ -52,7 +54,7 @@ int main(int argc, char **argv)
             nullptr,
             nullptr))
     {
-        std::cerr << "Error while processing pbf\n";
+        fmt::print(stderr, "Error while processing pbf\n");
         return EXIT_FAILURE;
     }
 
@@ -69,17 +71,15 @@ int main(int argc, char **argv)
         }
     }
 
-    std::cout.imbue(std::locale(""));
-    std::cout << "|   degree |      count    |   percent  |\n";
-    std::cout << "| -------- | ------------- | ---------- |\n";
-    std::cout << std::fixed << std::setprecision(2);
+    const auto count_width = std::max<size_t>(13, fmt::formatted_size("{}", fmt::group_digits(sum)));
+    fmt::print("|   degree | {:^{}} |   percent  |\n", "count", count_width);
+    fmt::print("| -------- | {:-<{}} | ---------- |\n", "", count_width);
 
     for (size_t i = 0; i < total_lat_degree_values; ++i)
     {
-        std::cout << "| " << std::setw(8) << i << " | " << std::setw(13) << lats[i] << " | " << std::setw(9)
-                  << (lats[i] * 100.0 / sum) << "% |\n";
+        fmt::print("| {:8} | {:>{}} | {:9.2f}% |\n", i, fmt::group_digits(lats[i]), count_width, lats[i] * 100.0 / sum);
     }
 
-    std::cout << "|   total  | " << std::setw(13) << sum << " |    100.00% |\n";
+    fmt::print("|   total  | {:>{}} |    100.00% |\n", fmt::group_digits(sum), count_width);
     return EXIT_SUCCESS;
 }

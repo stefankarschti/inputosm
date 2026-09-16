@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <iostream>
+#include <fmt/format.h>
+#include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
@@ -65,7 +66,7 @@ int main()
     const auto data_path = std::filesystem::path(__FILE__).parent_path() / "data" / "sample.osm";
     if (!std::filesystem::exists(data_path))
     {
-        std::cerr << "Missing test data file at " << data_path << '\n';
+        fmt::print(stderr, "Missing test data file at {:?}\n", data_path.string());
         return EXIT_FAILURE;
     }
 
@@ -135,195 +136,195 @@ int main()
 
     if (!parse_ok)
     {
-        std::cerr << "input_file returned failure" << '\n';
+        fmt::print(stderr, "input_file returned failure\n");
         return EXIT_FAILURE;
     }
 
     if (nodes.size() != 2)
     {
-        std::cerr << "Expected 2 nodes, got " << nodes.size() << '\n';
+        fmt::print(stderr, "Expected 2 nodes, got {}\n", nodes.size());
         return EXIT_FAILURE;
     }
     if (ways.size() != 1)
     {
-        std::cerr << "Expected 1 way, got " << ways.size() << '\n';
+        fmt::print(stderr, "Expected 1 way, got {}\n", ways.size());
         return EXIT_FAILURE;
     }
     if (relations.size() != 1)
     {
-        std::cerr << "Expected 1 relation, got " << relations.size() << '\n';
+        fmt::print(stderr, "Expected 1 relation, got {}\n", relations.size());
         return EXIT_FAILURE;
     }
 
     const NodeData* node1 = find_by_id(std::span<const NodeData>(nodes), 1);
     if (!node1)
     {
-        std::cerr << "Node 1 not found" << '\n';
+        fmt::print(stderr, "Node 1 not found\n");
         return EXIT_FAILURE;
     }
     if (node1->raw_latitude != static_cast<int64_t>(52.5200 * 1e7))
     {
-        std::cerr << "Unexpected raw latitude for node 1: " << node1->raw_latitude << '\n';
+        fmt::print(stderr, "Unexpected raw latitude for node 1: {}\n", node1->raw_latitude);
         return EXIT_FAILURE;
     }
     if (node1->raw_longitude != static_cast<int64_t>(13.4050 * 1e7))
     {
-        std::cerr << "Unexpected raw longitude for node 1: " << node1->raw_longitude << '\n';
+        fmt::print(stderr, "Unexpected raw longitude for node 1: {}\n", node1->raw_longitude);
         return EXIT_FAILURE;
     }
     if (node1->version != 3)
     {
-        std::cerr << "Unexpected version for node 1: " << node1->version << '\n';
+        fmt::print(stderr, "Unexpected version for node 1: {}\n", node1->version);
         return EXIT_FAILURE;
     }
     if (node1->changeset != 111)
     {
-        std::cerr << "Unexpected changeset for node 1: " << node1->changeset << '\n';
+        fmt::print(stderr, "Unexpected changeset for node 1: {}\n", node1->changeset);
         return EXIT_FAILURE;
     }
     if (node1->timestamp != make_timestamp(2020, 1, 2, 3, 4, 5))
     {
-        std::cerr << "Unexpected timestamp for node 1: " << node1->timestamp << '\n';
+        fmt::print(stderr, "Unexpected timestamp for node 1: {}\n", node1->timestamp);
         return EXIT_FAILURE;
     }
     auto node1_name = node1->tags.find("name");
     if (node1_name == node1->tags.end() || node1_name->second != "Node One")
     {
-        std::cerr << "Missing name tag on node 1" << '\n';
+        fmt::print(stderr, "Missing name tag on node 1\n");
         return EXIT_FAILURE;
     }
     auto node1_amenity = node1->tags.find("amenity");
     if (node1_amenity == node1->tags.end() || node1_amenity->second != "cafe")
     {
-        std::cerr << "Missing amenity tag on node 1" << '\n';
+        fmt::print(stderr, "Missing amenity tag on node 1\n");
         return EXIT_FAILURE;
     }
 
     const NodeData* node2 = find_by_id(std::span<const NodeData>(nodes), 2);
     if (!node2)
     {
-        std::cerr << "Node 2 not found" << '\n';
+        fmt::print(stderr, "Node 2 not found\n");
         return EXIT_FAILURE;
     }
     if (node2->raw_latitude != static_cast<int64_t>(48.8566 * 1e7))
     {
-        std::cerr << "Unexpected raw latitude for node 2: " << node2->raw_latitude << '\n';
+        fmt::print(stderr, "Unexpected raw latitude for node 2: {}\n", node2->raw_latitude);
         return EXIT_FAILURE;
     }
     if (node2->raw_longitude != static_cast<int64_t>(2.3522 * 1e7))
     {
-        std::cerr << "Unexpected raw longitude for node 2: " << node2->raw_longitude << '\n';
+        fmt::print(stderr, "Unexpected raw longitude for node 2: {}\n", node2->raw_longitude);
         return EXIT_FAILURE;
     }
     if (node2->version != 2)
     {
-        std::cerr << "Unexpected version for node 2" << '\n';
+        fmt::print(stderr, "Unexpected version for node 2\n");
         return EXIT_FAILURE;
     }
     if (node2->changeset != 222)
     {
-        std::cerr << "Unexpected changeset for node 2" << '\n';
+        fmt::print(stderr, "Unexpected changeset for node 2\n");
         return EXIT_FAILURE;
     }
     if (node2->timestamp != make_timestamp(2020, 2, 3, 4, 5, 6))
     {
-        std::cerr << "Unexpected timestamp for node 2" << '\n';
+        fmt::print(stderr, "Unexpected timestamp for node 2\n");
         return EXIT_FAILURE;
     }
     auto node2_name = node2->tags.find("name");
     if (node2_name == node2->tags.end() || node2_name->second != "Node Two")
     {
-        std::cerr << "Missing name tag on node 2" << '\n';
+        fmt::print(stderr, "Missing name tag on node 2\n");
         return EXIT_FAILURE;
     }
 
     const WayData* way10 = find_by_id(std::span<const WayData>(ways), 10);
     if (!way10)
     {
-        std::cerr << "Way 10 not found" << '\n';
+        fmt::print(stderr, "Way 10 not found\n");
         return EXIT_FAILURE;
     }
     if (way10->refs != std::vector<int64_t>{1, 2})
     {
-        std::cerr << "Unexpected node refs for way 10" << '\n';
+        fmt::print(stderr, "Unexpected node refs for way 10\n");
         return EXIT_FAILURE;
     }
     if (way10->version != 4)
     {
-        std::cerr << "Unexpected version for way 10" << '\n';
+        fmt::print(stderr, "Unexpected version for way 10\n");
         return EXIT_FAILURE;
     }
     if (way10->changeset != 333)
     {
-        std::cerr << "Unexpected changeset for way 10" << '\n';
+        fmt::print(stderr, "Unexpected changeset for way 10\n");
         return EXIT_FAILURE;
     }
     if (way10->timestamp != make_timestamp(2020, 3, 4, 5, 6, 7))
     {
-        std::cerr << "Unexpected timestamp for way 10" << '\n';
+        fmt::print(stderr, "Unexpected timestamp for way 10\n");
         return EXIT_FAILURE;
     }
     auto way10_highway = way10->tags.find("highway");
     if (way10_highway == way10->tags.end() || way10_highway->second != "residential")
     {
-        std::cerr << "Missing highway tag on way 10" << '\n';
+        fmt::print(stderr, "Missing highway tag on way 10\n");
         return EXIT_FAILURE;
     }
     auto way10_name = way10->tags.find("name");
     if (way10_name == way10->tags.end() || way10_name->second != "A Street")
     {
-        std::cerr << "Missing name tag on way 10" << '\n';
+        fmt::print(stderr, "Missing name tag on way 10\n");
         return EXIT_FAILURE;
     }
 
     const RelationData* relation20 = find_by_id(std::span<const RelationData>(relations), 20);
     if (!relation20)
     {
-        std::cerr << "Relation 20 not found" << '\n';
+        fmt::print(stderr, "Relation 20 not found\n");
         return EXIT_FAILURE;
     }
     if (relation20->members.size() != 2)
     {
-        std::cerr << "Unexpected members count for relation 20" << '\n';
+        fmt::print(stderr, "Unexpected members count for relation 20\n");
         return EXIT_FAILURE;
     }
     const auto& member_node = relation20->members[0];
     if (member_node.type != 0 || member_node.ref != 1 || member_node.role != "stop")
     {
-        std::cerr << "Unexpected first member for relation 20" << '\n';
+        fmt::print(stderr, "Unexpected first member for relation 20\n");
         return EXIT_FAILURE;
     }
     const auto& member_way = relation20->members[1];
     if (member_way.type != 1 || member_way.ref != 10 || member_way.role != "route")
     {
-        std::cerr << "Unexpected second member for relation 20" << '\n';
+        fmt::print(stderr, "Unexpected second member for relation 20\n");
         return EXIT_FAILURE;
     }
     if (relation20->version != 5)
     {
-        std::cerr << "Unexpected version for relation 20" << '\n';
+        fmt::print(stderr, "Unexpected version for relation 20\n");
         return EXIT_FAILURE;
     }
     if (relation20->changeset != 444)
     {
-        std::cerr << "Unexpected changeset for relation 20" << '\n';
+        fmt::print(stderr, "Unexpected changeset for relation 20\n");
         return EXIT_FAILURE;
     }
     if (relation20->timestamp != make_timestamp(2020, 4, 5, 6, 7, 8))
     {
-        std::cerr << "Unexpected timestamp for relation 20" << '\n';
+        fmt::print(stderr, "Unexpected timestamp for relation 20\n");
         return EXIT_FAILURE;
     }
     auto relation20_type = relation20->tags.find("type");
     if (relation20_type == relation20->tags.end() || relation20_type->second != "route")
     {
-        std::cerr << "Missing type tag on relation 20" << '\n';
+        fmt::print(stderr, "Missing type tag on relation 20\n");
         return EXIT_FAILURE;
     }
     auto relation20_route = relation20->tags.find("route");
     if (relation20_route == relation20->tags.end() || relation20_route->second != "bus")
     {
-        std::cerr << "Missing route tag on relation 20" << '\n';
+        fmt::print(stderr, "Missing route tag on relation 20\n");
         return EXIT_FAILURE;
     }
 

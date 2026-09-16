@@ -1,11 +1,13 @@
 #include <inputosm/inputosm.h>
 
-#include <iostream>
+#include <fmt/format.h>
+#include <cstdio>
 #include <cstdint>
 #include <numeric>
 #include <vector>
 #include <string>
 #include <cstring>
+#include <cerrno>
 
 #include <fcntl.h>
 #include <sys/types.h>
@@ -18,7 +20,7 @@ bool open_and_map(const char* filename, caddr_t& file_data, uint64_t& file_size)
     struct stat mmapstat;
     if (::stat(filename, &mmapstat) == -1)
     {
-        perror("stat");
+        fmt::print(stderr, "{}: {}\n", "stat", std::strerror(errno));
         return false;
     }
     file_size = mmapstat.st_size;
@@ -30,13 +32,13 @@ bool open_and_map(const char* filename, caddr_t& file_data, uint64_t& file_size)
     int fd;
     if ((fd = open(filename, O_RDONLY)) == -1)
     {
-        perror("open");
+        fmt::print(stderr, "{}: {}\n", "open", std::strerror(errno));
         return false;
     }
     file_data = (caddr_t)mmap((caddr_t)0, file_size, PROT_READ, MAP_SHARED, fd, 0);
     if (file_data == (caddr_t)(-1))
     {
-        perror("mmap");
+        fmt::print(stderr, "{}: {}\n", "mmap", std::strerror(errno));
     }
     close(fd);
     return (file_data != (caddr_t)(-1));
@@ -47,7 +49,7 @@ bool unmap_and_close(caddr_t file_data, uint64_t file_size)
     int result = munmap(file_data, file_size);
     if (result == -1)
     {
-        perror("munmap");
+        fmt::print(stderr, "{}: {}\n", "munmap", std::strerror(errno));
     }
     return result != -1;
 }
@@ -59,7 +61,7 @@ bool close_files(std::vector<int>& files)
     {
         if (-1 == ::close(fd))
         {
-            perror("close");
+            fmt::print(stderr, "{}: {}\n", "close", std::strerror(errno));
             result = false;
         }
         else
@@ -75,7 +77,7 @@ bool concatenate_and_remove_files(const char* root_filename, size_t file_count)
     int foutput = ::open(root_filename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (foutput == -1)
     {
-        perror("open");
+        fmt::print(stderr, "{}: {}\n", "open", std::strerror(errno));
         return false;
     }
     bool result = true;
@@ -105,11 +107,11 @@ int main(int argc, char** argv)
 {
     if (argc < 2)
     {
-        std::cerr << "Usage" << argv[0] << "<path-to-pbf> [read-metadata]\n";
+        fmt::print(stderr, "Usage{}<path-to-pbf> [read-metadata]\n", argv[0]);
         return EXIT_FAILURE;
     }
     const char* path = argv[1];
-    std::cout << "importing " << path << "\n";
+    fmt::print("importing {}\n", path);
     input_osm::set_max_thread_count();
 
     // File descriptors for nodes, ways, and relations.
@@ -201,7 +203,7 @@ int main(int argc, char** argv)
                 return true;
             }))
     {
-        std::cerr << "Error while processing pbf\n";
+        fmt::print(stderr, "Error while processing pbf\n");
         return EXIT_FAILURE;
     }
 
@@ -216,10 +218,9 @@ int main(int argc, char** argv)
     size_t num_nodes{std::accumulate(node_count.begin(), node_count.end(), 0LLU)};
     size_t num_ways{std::accumulate(way_count.begin(), way_count.end(), 0LLU)};
     size_t num_relations{std::accumulate(relation_count.begin(), relation_count.end(), 0LLU)};
-    std::cout.imbue(std::locale(""));
-    std::cout << "nodes: " << num_nodes << "\n";
-    std::cout << "ways: " << num_ways << "\n";
-    std::cout << "relations: " << num_relations << "\n";
+    fmt::print("nodes: {}\n", fmt::group_digits(num_nodes));
+    fmt::print("ways: {}\n", fmt::group_digits(num_ways));
+    fmt::print("relations: {}\n", fmt::group_digits(num_relations));
 
     return EXIT_SUCCESS;
 }

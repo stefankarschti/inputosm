@@ -878,14 +878,14 @@ struct context_t
         }
         catch (const std::exception& error)
         {
-            IOSM_ERROR("PBF block %zu at offset %llu: %s",
+            IOSM_ERROR("PBF block {} at offset {}: {}",
                        descriptor.index,
                        static_cast<unsigned long long>(descriptor.offset),
                        error.what());
         }
         catch (...)
         {
-            IOSM_ERROR("PBF block %zu at offset %llu: callback exception",
+            IOSM_ERROR("PBF block {} at offset {}: callback exception",
                        descriptor.index,
                        static_cast<unsigned long long>(descriptor.offset));
         }
@@ -953,7 +953,7 @@ bool read_file(const char* filename, context_t& context)
     }
     catch (const std::exception& error)
     {
-        IOSM_ERROR("PBF file near block %zu at offset %llu: %s",
+        IOSM_ERROR("PBF file near block {} at offset {}: {}",
                    index - 1,
                    static_cast<unsigned long long>(offset),
                    error.what());
@@ -986,7 +986,7 @@ bool run(const char* filename, context_t& context) noexcept
     }
     catch (const std::exception& error)
     {
-        IOSM_ERROR("PBF input: %s", error.what());
+        IOSM_ERROR("PBF input: {}", error.what());
     }
     catch (...)
     {
@@ -1024,7 +1024,7 @@ bool input_pbf_blocks(const char* filename, bool read_metadata, pbf_block_handle
     }
     catch (const std::exception& error)
     {
-        IOSM_ERROR("PBF input: %s", error.what());
+        IOSM_ERROR("PBF input: {}", error.what());
     }
     catch (...)
     {
@@ -1045,7 +1045,7 @@ bool input_pbf(const char* filename) noexcept
     }
     catch (const std::exception& error)
     {
-        IOSM_ERROR("PBF input: %s", error.what());
+        IOSM_ERROR("PBF input: {}", error.what());
     }
     catch (...)
     {

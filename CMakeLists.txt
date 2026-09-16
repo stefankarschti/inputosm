@@ -8,6 +8,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 
+# Get the specified fmt release.
+include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+set(FMT_DOC OFF)
+set(FMT_TEST OFF)
+set(FMT_MODULE OFF)
+set(FMT_INSTALL ON)
+set(FMT_SYSTEM_HEADERS ON)
+FetchContent_Declare(fmt
+    URL https://codeload.github.com/fmtlib/fmt/tar.gz/refs/tags/12.2.0
+    URL_HASH SHA256=8b852bb5aa6e7d8564f9e81394055395dd1d1936d38dfd3a17792a02bebd7af0
+)
+FetchContent_MakeAvailable(fmt)
+
 # Set the build options.
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
@@ -55,7 +71,7 @@ target_include_directories(${LIBRARY_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB Threads::Threads)
+target_link_libraries(${LIBRARY_NAME} PRIVATE EXPAT::EXPAT ZLIB::ZLIB Threads::Threads fmt::fmt)
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_20)
 
 if(BUILD_TESTING)

@@ -18,12 +18,12 @@
 #include <numeric>
 #include <map>
 #include <cstring>
+#include <cerrno>
 #include <vector>
 #include <algorithm>
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
+#include <fmt/format.h>
+#include <iterator>
+#include <string>
 #include <unordered_map>
 #include <thread>
 
@@ -42,13 +42,13 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
     {
         file_size += s.length();
     }
-    std::cout << "file size: " << file_size << " bytes\n";
+    fmt::print("file size: {} bytes\n", fmt::group_digits(file_size));
     if (file_size > 0)
     {
         int fd;
         if ((fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0644)) == -1)
         {
-            perror("create");
+            fmt::print(stderr, "{}: {}\n", "create", std::strerror(errno));
             return false;
         }
         if (file_size - 1 == lseek(fd, file_size - 1, SEEK_SET))
@@ -58,13 +58,13 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
         close(fd);
         if ((fd = open(filename, O_RDWR)) == -1)
         {
-            perror("open");
+            fmt::print(stderr, "{}: {}\n", "open", std::strerror(errno));
             return false;
         }
         uint8_t *file_data = (uint8_t *)mmap((caddr_t)0, file_size, PROT_WRITE, MAP_SHARED, fd, 0);
         if ((caddr_t)file_data == (caddr_t)(-1))
         {
-            perror("mmap");
+            fmt::print(stderr, "{}: {}\n", "mmap", std::strerror(errno));
         }
         close(fd);
         if ((caddr_t)file_data != (caddr_t)(-1))
@@ -79,8 +79,8 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
             // Copy each string to its position in the file.
             auto work = [&lines, &offsets, file_data](int index) {
                 memcpy(file_data + offsets[index], lines[index].data(), lines[index].length());
-                std::cout << ".";
-                std::cout.flush();
+                fmt::print(".");
+                std::fflush(stdout);
             };
             // Start the worker threads.
             size_t thread_count = offsets.size();
@@ -94,11 +94,11 @@ bool write_file(const char *filename, std::vector<std::string> &lines)
             {
                 if (th.joinable()) th.join();
             }
-            std::cout << "\n";
+            fmt::print("\n");
             // Remove the memory mapping.
             if (munmap(file_data, file_size) == -1)
             {
-                perror("munmap");
+                fmt::print(stderr, "{}: {}\n", "munmap", std::strerror(errno));
             }
         }
     }
@@ -109,12 +109,12 @@ int main(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage %s <path-to-pbf>\n", argv[0]);
+        fmt::print("Usage {} <path-to-pbf>\n", argv[0]);
         return EXIT_FAILURE;
     }
     const char *path = argv[1];
     input_osm::set_max_thread_count();
-    printf("running on %zu threads\n", input_osm::thread_count());
+    fmt::print("running on {} threads\n", fmt::group_digits(input_osm::thread_count()));
     std::vector<std::string> lines(input_osm::thread_count());
     struct pos
     {
@@ -125,35 +125,37 @@ int main(int argc, char **argv)
     std::vector<std::unordered_map<int64_t, pos>> node_pos_thread(input_osm::thread_count());
 
     // Collect the node data.
-    std::cout << "extracting nodes...\n";
+    fmt::print("extracting nodes...\n");
     if (!input_osm::input_file(
             path,
             true,
             [&lines, &node_pos_thread](std::span<const input_osm::node_t> node_list) noexcept -> bool {
-                std::stringstream ss;
+                std::string ss;
                 for (auto &n : node_list)
                 {
                     node_pos_thread[input_osm::thread_index][n.id].lat = n.raw_latitude;
                     node_pos_thread[input_osm::thread_index][n.id].lon = n.raw_longitude;
-                    ss << n.id << ";0;0;" << n.timestamp << ";" << n.changeset << ";'";
+                    fmt::format_to(std::back_inserter(ss), "{};0;0;{};{};'", n.id, n.timestamp, n.changeset);
                     for (auto itag = n.tags.begin(); itag != n.tags.end(); ++itag)
                     {
-                        ss << "\"" << itag->key << "\"=>\"" << itag->value << "\"";
-                        if (itag < n.tags.end() - 1) ss << ",";
+                        fmt::format_to(std::back_inserter(ss), "\"{}\"=>\"{}\"", itag->key, itag->value);
+                        if (itag < n.tags.end() - 1) fmt::format_to(std::back_inserter(ss), ",");
                     }
-                    ss << "';POINT(" << std::fixed << std::setprecision(7) << n.raw_latitude / 10'000'000.0 << " "
-                       << n.raw_longitude / 10'000'000.0 << ")\n";
+                    fmt::format_to(std::back_inserter(ss),
+                                   "';POINT({:.7f} {:.7f})\n",
+                                   n.raw_latitude / 10'000'000.0,
+                                   n.raw_longitude / 10'000'000.0);
                 }
-                lines[input_osm::thread_index] += ss.str();
+                lines[input_osm::thread_index] += ss;
                 return true;
             },
             nullptr,
             nullptr))
     {
-        printf("Error while processing pbf\n");
+        fmt::print("Error while processing pbf\n");
         return EXIT_FAILURE;
     }
-    std::cout << "writing nodes csv...\n";
+    fmt::print("writing nodes csv...\n");
     write_file("nodes.csv", lines);
     for (auto &line : lines)
     {
@@ -168,7 +170,7 @@ int main(int argc, char **argv)
     };
 
     // Collect the way data.
-    std::cout << "extracting ways and relations...\n";
+    fmt::print("extracting ways and relations...\n");
     std::vector<std::string> lines_way_node(input_osm::thread_count());
     std::vector<std::string> lines_relations(input_osm::thread_count());
     std::vector<std::string> lines_relation_members(input_osm::thread_count());
@@ -177,82 +179,89 @@ int main(int argc, char **argv)
             true,
             nullptr,
             [&lines, &node_pos, &lines_way_node](std::span<const input_osm::way_t> way_list) noexcept -> bool {
-                std::stringstream ss;
-                std::stringstream ss_way_node;
+                std::string ss;
+                std::string ss_way_node;
                 for (auto &way : way_list)
                 {
-                    ss << way.id << ";0;0;" << way.timestamp << ";" << way.changeset << ";'";
+                    fmt::format_to(std::back_inserter(ss), "{};0;0;{};{};'", way.id, way.timestamp, way.changeset);
                     for (auto itag = way.tags.begin(); itag != way.tags.end(); ++itag)
                     {
-                        ss << "\"" << itag->key << "\"=>\"" << itag->value << "\"";
-                        if (itag < way.tags.end() - 1) ss << ",";
+                        fmt::format_to(std::back_inserter(ss), "\"{}\"=>\"{}\"", itag->key, itag->value);
+                        if (itag < way.tags.end() - 1) fmt::format_to(std::back_inserter(ss), ",");
                     }
-                    ss << "';{";
+                    fmt::format_to(std::back_inserter(ss), "';{{");
                     size_t sequence_id = 0;
                     for (auto inode = way.node_refs.begin(); inode != way.node_refs.end(); ++inode)
                     {
-                        ss_way_node << way.id << ";" << *inode << ";" << sequence_id++ << "\n";
-                        ss << *inode;
-                        if (inode < way.node_refs.end() - 1) ss << ",";
+                        fmt::format_to(std::back_inserter(ss_way_node), "{};{};{}\n", way.id, *inode, sequence_id++);
+                        fmt::format_to(std::back_inserter(ss), "{}", *inode);
+                        if (inode < way.node_refs.end() - 1) fmt::format_to(std::back_inserter(ss), ",");
                     }
-                    ss << "};";
-                    ss << "BBOX();";
-                    ss << "LINESTRING(";
+                    fmt::format_to(std::back_inserter(ss), "}};");
+                    fmt::format_to(std::back_inserter(ss), "BBOX();");
+                    fmt::format_to(std::back_inserter(ss), "LINESTRING(");
                     for (auto inode = way.node_refs.begin(); inode != way.node_refs.end(); ++inode)
                     {
                         auto &n = node_pos(*inode);
-                        ss << std::fixed << std::setprecision(7) << n.lat / 10'000'000.0 << " " << n.lon / 10'000'000.0;
-                        if (inode < way.node_refs.end() - 1) ss << ",";
+                        fmt::format_to(
+                            std::back_inserter(ss), "{:.7f} {:.7f}", n.lat / 10'000'000.0, n.lon / 10'000'000.0);
+                        if (inode < way.node_refs.end() - 1) fmt::format_to(std::back_inserter(ss), ",");
                     }
-                    ss << ")\n";
+                    fmt::format_to(std::back_inserter(ss), ")\n");
                 }
-                lines[input_osm::thread_index] += ss.str();
-                lines_way_node[input_osm::thread_index] += ss_way_node.str();
+                lines[input_osm::thread_index] += ss;
+                lines_way_node[input_osm::thread_index] += ss_way_node;
                 return true;
             },
             [&lines_relations,
              &lines_relation_members](std::span<const input_osm::relation_t> relation_list) noexcept -> bool {
-                std::stringstream ss;
-                std::stringstream ss_members;
+                std::string ss;
+                std::string ss_members;
                 for (auto &relation : relation_list)
                 {
-                    ss << relation.id << ";0;0;" << relation.timestamp << ";" << relation.changeset << ";'";
+                    fmt::format_to(
+                        std::back_inserter(ss), "{};0;0;{};{};'", relation.id, relation.timestamp, relation.changeset);
                     for (auto itag = relation.tags.begin(); itag != relation.tags.end(); ++itag)
                     {
-                        ss << "\"" << itag->key << "\"=>\"" << itag->value << "\"";
-                        if (itag < relation.tags.end() - 1) ss << ",";
+                        fmt::format_to(std::back_inserter(ss), "\"{}\"=>\"{}\"", itag->key, itag->value);
+                        if (itag < relation.tags.end() - 1) fmt::format_to(std::back_inserter(ss), ",");
                     }
-                    ss << "'\n";
+                    fmt::format_to(std::back_inserter(ss), "'\n");
 
                     size_t sequence_id = 0;
                     for (auto imember = relation.members.begin(); imember != relation.members.end(); ++imember)
                     {
                         const char types[3] = {'N', 'W', 'R'};
-                        ss_members << relation.id << ";" << imember->id << ";" << types[imember->type] << ";\""
-                                   << imember->role << "\";" << sequence_id++ << "\n";
+                        fmt::format_to(std::back_inserter(ss_members),
+                                       "{};{};{};\"{}\";{}\n",
+                                       relation.id,
+                                       imember->id,
+                                       types[imember->type],
+                                       imember->role,
+                                       sequence_id++);
                     }
                 }
-                lines_relations[input_osm::thread_index] += ss.str();
-                lines_relation_members[input_osm::thread_index] += ss_members.str();
+                lines_relations[input_osm::thread_index] += ss;
+                lines_relation_members[input_osm::thread_index] += ss_members;
                 return true;
             }))
     {
-        printf("Error while processing pbf\n");
+        fmt::print("Error while processing pbf\n");
         return EXIT_FAILURE;
     }
-    std::cout << "writing ways csv...\n";
+    fmt::print("writing ways csv...\n");
     write_file("ways.csv", lines);
 
-    std::cout << "writing way nodes csv...\n";
+    fmt::print("writing way nodes csv...\n");
     write_file("way_node.csv", lines_way_node);
 
-    std::cout << "writing relations csv...\n";
+    fmt::print("writing relations csv...\n");
     write_file("relations.csv", lines_relations);
 
-    std::cout << "writing relation members csv...\n";
+    fmt::print("writing relation members csv...\n");
     write_file("relation_members.csv", lines_relation_members);
 
-    std::cout << "done.\n";
+    fmt::print("done.\n");
 
     return EXIT_SUCCESS;
 }

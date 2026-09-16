@@ -77,7 +77,7 @@ bool input_file(const char* filename,
     }
     else
     {
-        IOSM_ERROR("Can't detect type from: %s", filename);
+        IOSM_ERROR("Can't detect type from: {}", filename);
         return false;
     }
 

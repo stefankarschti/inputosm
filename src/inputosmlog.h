@@ -15,6 +15,8 @@
 #define _INPUTOSMLOG_H_
 
 #include <inputosm/inputosm.h>
+#include <fmt/format.h>
+#include <utility>
 
 #define INPUT_OSM_LOG_ENABLED 1
 
@@ -25,12 +27,21 @@ extern log_level_t g_log_level;
 extern log_callback_t g_log_callback;
 
 /**
- * @brief Write a log message with the specified level and printf format.
+ * @brief Write a log message with the specified level and format.
  * @param level The log level.
- * @param fmt The printf format string. The function does not validate this string.
- * @param ... The arguments for the printf format string.
+ * @param format The format string. The compiler checks this string.
+ * @param args The arguments for the format string.
  */
-void log(log_level_t level, const char* fmt, ...) noexcept;
+template <typename... T>
+void log(log_level_t level, fmt::format_string<T...> format, T&&... args) noexcept
+{
+    if (level < g_log_level) return;
+
+    char buffer[512];
+    const auto result = fmt::format_to_n(buffer, sizeof(buffer) - 1, format, std::forward<T>(args)...);
+    *result.out = '\0';
+    g_log_callback(level, buffer);
+}
 
 } // namespace input_osm
 
