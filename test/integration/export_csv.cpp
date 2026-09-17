@@ -15,12 +15,9 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <numeric>
-#include <map>
 #include <cstring>
 #include <cerrno>
 #include <vector>
-#include <algorithm>
 #include <fmt/format.h>
 #include <iterator>
 #include <string>

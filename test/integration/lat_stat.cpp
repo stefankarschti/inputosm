@@ -20,7 +20,6 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdint>
-#include <numeric>
 #include <vector>
 
 int main(int argc, char** argv)
