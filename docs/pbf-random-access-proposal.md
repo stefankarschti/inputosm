@@ -2,6 +2,9 @@
 
 Status: Implemented in version 0.3.0.
 
+The [deferred decoding proposal](pbf-deferred-decoding-proposal.md) describes the next design iteration.
+That iteration changes the block interface and preserves `input_file()`.
+
 Review basis before implementation: Repository revision `e2458c0`.
 
 ## Purpose
