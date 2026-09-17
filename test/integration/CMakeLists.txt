@@ -31,6 +31,17 @@ add_executable(read_block read_block.cpp)
 target_link_libraries(read_block PRIVATE inputosm::inputosm fmt::fmt)
 
 if(BUILD_TESTING)
+    add_executable(statistics_fixture statistics_fixture.cpp)
+    target_link_libraries(statistics_fixture PRIVATE libdeflate::libdeflate_static)
+    add_test(NAME statistics_output
+        COMMAND ${CMAKE_COMMAND}
+            -DPROGRAM=$<TARGET_FILE:statistics>
+            -DFIXTURE_GENERATOR=$<TARGET_FILE:statistics_fixture>
+            -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/statistics.osm.pbf
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/statistics_test.cmake
+    )
+    set_tests_properties(statistics_output PROPERTIES LABELS integration TIMEOUT 30)
+
     add_test(NAME output_locale
         COMMAND ${CMAKE_COMMAND}
             -DCOUNT_ENTITY=$<TARGET_FILE:count_entity>
