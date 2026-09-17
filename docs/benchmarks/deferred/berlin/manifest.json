@@ -1,0 +1,30 @@
+{
+  "input": "/mnt/maps/berlin-260514.osm.pbf",
+  "file_size": 97937692,
+  "input_mtime_ns": 1778804218000000000,
+  "platform": "Linux-6.8.12-15-pve-x86_64-with-glibc2.39",
+  "arguments": {
+    "input": "/mnt/maps/berlin-260514.osm.pbf",
+    "candidate": "build/test/benchmark/pbf_benchmark",
+    "main": "build/deferred-baselines/main-benchmark",
+    "reader": "build/deferred-baselines/reader-benchmark",
+    "output": "build/benchmarks/deferred-berlin-final",
+    "threads": 32,
+    "rounds": 3,
+    "requests": 4096,
+    "only": null
+  },
+  "binaries": {
+    "candidate": "b44d5a36ae3af3af1dea9cdee9908436a5e1aa4acbb3233e042f1dd5c181fed0",
+    "main": "b2a4e13ca98837907e72e4ffe5546a21a4665fb719682f068685892e6246a12a",
+    "reader": "5242120ca3a2000f561a767e70d7b3a89efd3d7a7392eb7f20ba44e867ab26c0"
+  },
+  "source_hashes": {
+    "src/inputosmpbf.cpp": "26b53e20f40037627fb6eb7f37676ec70f42a118c4665daf1882a17e7398ddc1",
+    "src/pbfcolumns.h": "584eedde68d4e5f1d3db8fbc8b6d64af028b2328b7038760b36c32545ddb7a9f",
+    "include/inputosm/inputosm.h": "f6d56a8ce60952718105c32a55d729343363e268af6a5771cb59fe599824c250",
+    "test/benchmark/pbf_benchmark.cpp": "53928f52ebb5b3ca54e68c03c12a97160a73f48c7e2bdd4ca077fe8e48da1632"
+  },
+  "main_revision": "f6973c3ef0e08b196f10b481729586e94c43a802",
+  "reader_revision": "e49055a2b195d25489021f8845ecb9bf64ed2bfc"
+}
