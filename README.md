@@ -249,6 +249,7 @@ A relation member has type `0` for a node, `1` for a way, or `2` for a relation.
 Use `input_file()` with a path, a metadata option, and three handlers.
 A handler is a callback for one entity type.
 Each handler has the type `std::function<bool(std::span<const T>)>` for its entity type `T`.
+Entity handlers receive only nonempty batches.
 A handler returns `true` to continue.
 Refer to section 11 for the limits on cancellation.
 
@@ -576,10 +577,12 @@ Replace the removed `input_pbf_blocks()` function with `pbf_reader_t::open()` an
 5. Use `decode_strings()` when string lookup is necessary.
 6. Check string ID bounds in the application before lookup.
 
-The `input_file()` signature, entity types, callback order, and XML behavior remain unchanged.
+The `input_file()` signature, entity types, and XML behavior remain unchanged.
+PBF entity callbacks now skip empty batches.
+Nonempty batches retain their primitive-group boundaries and callback order.
 Its PBF adapter uses public block iteration and the shared group decoder.
 It writes legacy records directly and retains the existing string lookup and metadata checks.
-The adapter preserves empty callback batches and validates entities when handlers are absent.
+The adapter validates entities even when their handlers are absent.
 A callback failure stops subsequent callbacks for that group.
 Callbacks that already started on other workers can finish during cancellation.
 

@@ -214,16 +214,16 @@ The adapter uses this order for each primitive group:
 
 | Order | Condition | Call |
 | --- | --- | --- |
-| 1 | The group contains ordinary or dense nodes, and a node handler exists. | `nodes(block.nodes)` |
-| 2 | A way handler exists, and the preceding call succeeded. | `ways(block.ways)` |
-| 3 | A relation handler exists, and the preceding calls succeeded. | `relations(block.relations)` |
+| 1 | The decoded node span is nonempty, and a node handler exists. | `nodes(block.nodes)` |
+| 2 | The decoded way span is nonempty, its handler exists, and preceding calls succeeded. | `ways(block.ways)` |
+| 3 | The decoded relation span is nonempty, its handler exists, and preceding calls succeeded. | `relations(block.relations)` |
 
 The spans contain entities from that group only.
 The adapter passes them without copying entities or string bytes.
-Supplied way and relation handlers also receive empty spans.
-An empty node group causes an empty node callback.
+The adapter skips all empty entity spans.
+An empty dense-node group causes no entity callback.
 A block without primitive groups causes no entity callbacks.
-These rules preserve the previous entity batch boundaries and order.
+Nonempty batches retain their primitive-group boundaries and callback order.
 
 A handler result of `false` or an exception stops subsequent entity calls for that group.
 The reader stops pending work and joins all worker threads before returning `false`.
@@ -689,7 +689,7 @@ The required acceptance checks are:
 | Large offsets and size arithmetic near limits | Valid offsets above 4 GiB work on supported systems. Overflow and out-of-range values fail safely. |
 | Migrated sequential block API | `read_blocks()` retains block contents, callback order rules, bounded queues, and cancellation behavior. |
 | PBF entity adapter with several primitive groups | Entity handlers retain primitive-group batches. Combined entity values match `read_blocks()`. |
-| Missing entity handlers or empty entity spans | Skip absent handlers. Preserve the previous primitive-group rules for empty spans. |
+| Missing entity handlers or empty entity spans | Skip absent handlers and empty entity spans. |
 | All entity handlers absent | The adapter still scans and validates all blocks. Valid input succeeds. |
 | Node or way handler returns `false` or throws | No later entity handler runs for that block. `input_pbf()` returns `false` after all workers finish. |
 | Invalid later group in a data block | Earlier entity batches can already have reached callbacks. Public block callbacks receive no partial block. |

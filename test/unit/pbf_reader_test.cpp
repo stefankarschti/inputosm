@@ -258,15 +258,14 @@ void adapter_test(files_t& files)
         [&](auto nodes) { return record('n', nodes); },
         [&](auto ways) { return record('w', ways); },
         [&](auto relations) { return record('r', relations); }));
-    CHECK((calls ==
-           std::vector<std::pair<char, size_t>>{
-               {'w', 1}, {'r', 0}, {'n', 1}, {'w', 0}, {'r', 0}, {'n', 1}, {'w', 0}, {'r', 0}, {'w', 0}, {'r', 1}}));
+    CHECK((calls == std::vector<std::pair<char, size_t>>{{'w', 1}, {'n', 1}, {'n', 1}, {'r', 1}}));
     CHECK(input_file(path.c_str(), false, {}, {}, {}));
     for (bool throws : {false, true})
-        for (int stop : {0, 1, 2})
+        for (int stop : {0, 1, 2, 3})
         {
             size_t count = 0;
-            auto handler = [&](auto) {
+            auto handler = [&](auto entities) {
+                CHECK(!entities.empty());
                 if (count++ != static_cast<size_t>(stop)) return true;
                 if (throws) throw std::runtime_error("Entity handler failure");
                 return false;
@@ -279,6 +278,7 @@ void adapter_test(files_t& files)
                      false,
                      {},
                      [&](auto entities) {
+                         CHECK(entities.size() == 1);
                          ways += entities.size();
                          return true;
                      },
@@ -295,6 +295,66 @@ void adapter_test(files_t& files)
                       {},
                       {}));
     CHECK(partial == 2);
+}
+
+void adapter_nonempty_test(files_t& files)
+{
+    const auto empty_dense = packed(1, {}) + packed(8, {}) + packed(9, {});
+    const auto empty_groups = message(2, "") + message(2, message(2, empty_dense));
+    const auto ordinary = message(2, message(1, node(1)) + message(1, node(2)));
+    const auto dense = message(2, message(2, packed(1, {sint(3), sint(1)}) + packed(8, {0, 0}) + packed(9, {0, 0})));
+    const auto ways = message(2, message(3, integer(1, 5)) + message(3, integer(1, 6)));
+    const auto relations = message(2, message(4, integer(1, 7)) + message(4, integer(1, 8)));
+    struct case_t
+    {
+        std::string groups;
+        size_t node_calls, way_calls, relation_calls;
+    };
+    const std::vector<case_t> cases{
+        {"", 0, 0, 0},
+        {ordinary, 1, 0, 0},
+        {dense, 1, 0, 0},
+        {ways, 0, 1, 0},
+        {relations, 0, 0, 1},
+        {ordinary + empty_groups + dense + empty_groups + ways + empty_groups + relations, 2, 1, 1}};
+    for (const bool compressed : {false, true})
+    {
+        const auto block = [&](const std::string& payload) {
+            return compressed ? zlib_block(payload) : raw_block("OSMData", payload);
+        };
+        for (const auto& test : cases)
+        {
+            const auto path = files.write(header() + block(table()) +
+                                          block(table() + empty_groups + test.groups + empty_groups) +
+                                          block(table() + empty_groups));
+            for (const bool metadata : {false, true})
+                for (const size_t threads : {1, 4})
+                {
+                    set_thread_count(threads);
+                    std::atomic<size_t> node_calls{0}, way_calls{0}, relation_calls{0};
+                    const auto record = [](auto entities, auto& calls) {
+                        CHECK(entities.size() == 2);
+                        ++calls;
+                        return true;
+                    };
+                    CHECK(input_file(
+                        path.c_str(),
+                        metadata,
+                        [&](auto entities) { return record(entities, node_calls); },
+                        [&](auto entities) { return record(entities, way_calls); },
+                        [&](auto entities) { return record(entities, relation_calls); }));
+                    CHECK(node_calls == test.node_calls);
+                    CHECK(way_calls == test.way_calls);
+                    CHECK(relation_calls == test.relation_calls);
+                }
+        }
+    }
+    const auto path = files.write(header());
+    const auto reject_callback = [](auto) {
+        return false;
+    };
+    CHECK(input_file(path.c_str(), false, reject_callback, reject_callback, reject_callback));
+    set_thread_count(1);
 }
 
 void descriptor_test(files_t& files)
@@ -534,6 +594,7 @@ int main()
         access_test(files);
         failure_test(files);
         adapter_test(files);
+        adapter_nonempty_test(files);
         descriptor_test(files);
         concurrent_test(files);
         large_offset_test(files);
