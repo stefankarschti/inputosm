@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(inputosm VERSION 0.2.0 LANGUAGES C CXX)
+project(inputosm VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +26,9 @@ FetchContent_MakeAvailable(fmt)
 
 # Set the build options.
 option(INPUTOSM_INTEGRATION_TESTS "Build integration tests" ON)
+option(INPUTOSM_BENCHMARKS "Build PBF benchmarks" OFF)
+option(INPUTOSM_BENCH_GENERIC_HEADERS "Use generic BlobHeader parsing for benchmark comparison" OFF)
+option(INPUTOSM_BENCH_INDEPENDENT_MAPS "Use separate file mappings for benchmark comparison" OFF)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
 option(ENABLE_CLANG_TIDY "Enable clang-tidy checks" ON)
 
@@ -67,6 +70,12 @@ set(SOURCES
 set(LIBRARY_NAME ${PROJECT_NAME})
 add_library(${LIBRARY_NAME} ${SOURCES})
 add_library(${LIBRARY_NAME}::${LIBRARY_NAME} ALIAS ${LIBRARY_NAME})
+if(INPUTOSM_BENCH_GENERIC_HEADERS)
+    target_compile_definitions(${LIBRARY_NAME} PRIVATE INPUTOSM_BENCH_GENERIC_HEADERS)
+endif()
+if(INPUTOSM_BENCH_INDEPENDENT_MAPS)
+    target_compile_definitions(${LIBRARY_NAME} PRIVATE INPUTOSM_BENCH_INDEPENDENT_MAPS)
+endif()
 target_include_directories(${LIBRARY_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -81,6 +90,10 @@ endif()
 # Add the integration tests.
 if(INPUTOSM_INTEGRATION_TESTS)
     add_subdirectory(test/integration)
+endif()
+
+if(INPUTOSM_BENCHMARKS)
+    add_subdirectory(test/benchmark)
 endif()
 
 # Configure the installation files.

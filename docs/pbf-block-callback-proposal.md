@@ -2,6 +2,9 @@
 
 Status: Implemented in version 0.2.0.
 
+Version 0.3.0 replaces this free function with the [PBF reader API](pbf-random-access-proposal.md).
+This document records the earlier API contract.
+
 ## 1. Purpose
 
 Add an API that calls an application function once for each decoded PBF data block.
