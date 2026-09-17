@@ -20,7 +20,10 @@ function(check_output program expected)
 endfunction()
 
 check_output("${COUNT_ALL}" "nodes: 17,005\nways: 12\nrelations: 4\n")
-check_output("${COUNT_BLOCKS}" "nodes: 17,005\nways: 12\nrelations: 4\n")
+check_output("${COUNT_BLOCKS}" "blocks: 5\n")
+if(NOT LAST_OUTPUT STREQUAL "blocks: 5\n")
+    message(FATAL_ERROR "Incorrect block count output:\n${LAST_OUTPUT}")
+endif()
 check_output("${STATISTICS}" "nodes: 17,005" "max node id: 5000017004")
 check_output("${LAT_STAT}" "17,005" "100.00%")
 

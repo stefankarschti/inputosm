@@ -622,8 +622,8 @@ The proposal does not retain an eager compatibility wrapper.
 | Public conversion fields | `parameters()` or the parameters supplied with entity batches. |
 | `read_blocks(decode_metadata, handler)` | `read_blocks(handler)`, followed by explicit decoding inside the handler. |
 
-The integration program `count_blocks` will use `counts()`.
-It will no longer decode entity arrays to read their span sizes.
+The integration program `count_blocks` counts data block callbacks through `read_blocks()`.
+It does not request payload decompression or entity counts.
 The random block integration program will select the fields that it prints or checks.
 `count_all` will continue to use `input_file()` as the compatibility benchmark.
 
@@ -679,8 +679,8 @@ Keep those diagnostic runs separate from the required 32-thread comparison.
 | --- | --- |
 | `input_file()` with legacy entity callbacks | Compare against the frozen current implementation. Reject a repeatable sequential regression. |
 | `count_all` | Confirm that compatibility preserves the current counting workload. |
-| `count_blocks` using `counts()` | Compare against eager `count_blocks` and `count_all`. Measure the benefit of avoiding entity arrays. |
-| Framing-only block iteration | Measure descriptor and scheduling cost without payload requests. Do not compare it as equivalent entity work. |
+| Combined entity counts using `counts()` | Compare against eager entity counting and `count_all`. Measure the benefit of avoiding entity arrays. |
+| `count_blocks` using framing-only block iteration | Measure descriptor and scheduling cost without payload requests. Do not compare it as equivalent entity work. |
 | Node IDs only | Measure selected decoding with a checksum over every emitted ID. |
 | Coordinates only | Measure independent coordinate selection and compare coordinate checksums. |
 | All legacy-equivalent fields | Compare group output against equivalent values from the legacy interface. |
