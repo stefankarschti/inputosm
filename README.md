@@ -15,8 +15,8 @@ The XML reader uses the thread that calls `input_file()`.
 3. Build and install
 4. Conan usage
 5. CMake options
-6. API description
-7. Examples
+6. [API description](#6-api-description)
+7. [Examples and best practices](#7-examples)
 8. Logs and diagnostics
 9. Performance and benchmarks
 10. Architecture
@@ -27,6 +27,9 @@ The XML reader uses the thread that calls `input_file()`.
 ## 1. Features
 
 - Read PBF data with multiple threads.
+- Read individual PBF data blocks by file index, with an optional offset table.
+- Count entities without constructing entity arrays.
+- Decode selected entity columns, strings, and header metadata on demand.
 - Read OSM data and OSC changes in XML format.
 - Get a span of entities in each callback. A span gives access to a sequence of objects in adjacent memory locations.
 - Use different callbacks for nodes, ways, and relations.
@@ -37,8 +40,9 @@ The XML reader uses the thread that calls `input_file()`.
 
 ## 2. Start
 
-This example counts entities with one thread.
-Section 7.1 shows counters for multiple threads.
+This example uses the `input_file()` compatibility API with one thread.
+It accepts PBF and XML input.
+For PBF counts without entity decoding, use the [block API example](#71-count-entities).
 
 ```cpp
 #include <inputosm/inputosm.h>
@@ -215,7 +219,16 @@ cmake -S . -B build -DINPUTOSM_INTEGRATION_TESTS=OFF -DENABLE_CLANG_TIDY=OFF
 ## 6. API description
 
 The public application programming interface (API) uses the `input_osm` namespace.
-The declarations are in `include/inputosm/inputosm.h`.
+The declarations are in [inputosm.h](include/inputosm/inputosm.h).
+
+| Interface | Use |
+| --- | --- |
+| `input_file()` | Read PBF or XML into entity records with text tags. Preserve existing application callbacks. |
+| `pbf_reader_t` | Read PBF blocks, count entities, or decode selected columns. Support independent readers and random block access. |
+
+PBF reference: [reader operations](#read-pbf-blocks-on-demand), [block methods](#block-methods-and-counts), [field options](#select-entity-fields),
+[strings and metadata](#strings-and-entity-metadata), [header fields](#read-header-metadata),
+[random access](#read-a-block-by-index), and [lifetimes and failures](#validation-failures-and-data-lifetime).
 
 ### Data structures
 
@@ -244,127 +257,316 @@ This option does not change how the XML reader reads metadata attributes.
 
 ### Read PBF blocks on demand
 
-Use `pbf_reader_t::read_blocks()` for one callback per `OSMData` block.
-The callback receives an opaque block reference.
-The reader decompresses its payload only when a block method needs that payload.
-Count methods do not construct entity arrays.
+`pbf_reader_t` reads PBF files through opaque `pbf_block_t` references.
+The block contents remain private.
+The reader decodes data only when a block method requests it.
+Use [block counting](#74-count-data-blocks) when you do not need entity data.
+Use [entity counting](#71-count-entities) when you need counts without entity arrays.
 
-```cpp
-input_osm::pbf_reader_t reader;
-reader.set_max_thread_count();
-const bool ok = reader.open("map.osm.pbf") && reader.read_blocks(
-    [](const input_osm::pbf_block_t& block) {
-        input_osm::pbf_counts_t counts;
-        if (!block.counts(counts)) return false;
-        fmt::print("Block {}: {} nodes, {} ways, {} relations\n",
-                   block.index(), counts.nodes, counts.ways, counts.relations);
-        return true;
-    });
-```
+| Reader method | Behavior |
+| --- | --- |
+| `open(filename)` | Open the file mapping. Check the initial header and required features. Return `false` if the reader is already open. |
+| `close()` | Release this reader's file reference and index. Call only while the reader is idle. |
+| `is_open()` | Report whether a file is open. |
+| `set_thread_count(count)` | Set the worker count for `read_blocks()`. Zero selects one worker. The hardware thread count is the maximum. |
+| `set_max_thread_count()` | Select the hardware thread count. |
+| `thread_count()` | Return this reader's worker count. The default is one. |
+| `read_blocks(handler)` | Visit each `OSMData` block from the file start. Skip the header and unknown block types. |
+| `read_block(index, handler)` | Visit one data block in the calling thread. Use a file block index. |
+| `decode_header(handler)` | Decode header metadata. Call the handler once in the calling thread. |
+| `build_index()` | Build an optional file offset table. Repeated calls reuse the completed index. |
+| `has_index()` | Report whether this reader has an index. |
+| `index_memory_bytes()` | Return the allocated index capacity in bytes. Exclude the file mapping and decode buffers. |
 
-`node_count()`, `way_count()`, and `relation_count()` request individual counts.
-The first query inspects the payload. Later queries reuse completed counts.
-Dense node counts scan encoded IDs without calculating absolute IDs.
-A count query does not validate unrequested entity fields.
+Read and decode handlers return `bool`.
+Supply a nonempty handler for each read or decode operation.
+Return `true` to continue.
+Return `false` to stop the operation.
+Check every operation result before using its output.
+The Boolean result does not distinguish a stop request from an error.
+Reader destruction closes the reader.
+Reader objects support moves but do not support copies.
+Move or destroy a reader only while it is idle.
 
-`block.index()` includes the initial header at index zero.
-`block.file_offset()` identifies the four-byte length field.
-`parameters()` supplies the coordinate and timestamp conversion parameters.
 The reader supports raw and Zlib Blobs, ordinary nodes, and dense nodes.
 It checks required header features during `open()`.
-It rejects unsupported required features, including historical visibility.
+It rejects unsupported required features, including `HistoricalInformation`.
+Full header metadata decoding remains explicit.
 
 With one thread, block callbacks run in file order in the calling thread.
-With multiple threads, callbacks can overlap and finish in a different order.
-Every decode method runs synchronously in the thread that calls it.
+With multiple threads, callbacks can overlap and arrive out of file order.
+Each block method and its callbacks run synchronously in that block callback's thread.
+A decode method does not start more workers.
 Keep the borrowed block reference in its callback thread.
+
+Use one operation at a time on each reader.
 Use a separate reader for a nested read or a simultaneous operation.
 Readers of the same unchanged file share one immutable mapping.
 Keep the file contents unchanged while any reader remains open.
+Reader thread settings are independent of the global settings for `input_file()`.
+
+### Block methods and counts
+
+All block methods require an active block callback.
+The callback receives `const pbf_block_t&`.
+The block cannot be copied.
+
+| Block method | Result |
+| --- | --- |
+| `index()` | File block index. The initial header has index zero. Unknown block types also occupy indexes. |
+| `file_offset()` | Byte offset of the block's four-byte length field. |
+| `parameters(result)` | Coordinate and timestamp parameters in `pbf_parameters_t`. |
+| `string_table_size(result)` | Number of string table entries, including entry zero. |
+| `node_count(result)` | Number of ordinary and dense nodes combined. |
+| `way_count(result)` | Number of ways. |
+| `relation_count(result)` | Number of relations. |
+| `counts(result)` | All three entity counts in `pbf_counts_t`. |
+| `decode_strings(handler)` | Strings in table order through `bool(std::string_view)`. |
+| `decode_nodes(options, handler)` | Selected node columns through `bool(const pbf_node_batch_t&)`. |
+| `decode_ways(options, handler)` | Selected way columns through `bool(const pbf_way_batch_t&)`. |
+| `decode_relations(options, handler)` | Selected relation columns through `bool(const pbf_relation_batch_t&)`. |
+| `decode_entities(options, handler)` | Selected entity types through `bool(const pbf_group_batch_t&)`. |
+| `validate()` | Check supported strings and entity encodings without application entity callbacks. |
+
+Count and parameter queries return `bool` and write through an output reference.
+Individual counts and the string table size use `size_t`.
+`pbf_counts_t` contains `nodes`, `ways`, and `relations`.
+
+`index()` and `file_offset()` do not inspect the data payload.
+Other block methods decompress the payload when necessary.
+The block keeps decompressed bytes and completed counts until its block callback returns.
+Repeated count queries reuse completed results.
+Dense node counts scan encoded IDs without calculating absolute IDs.
+`counts()` combines all three counts in one group traversal.
+Separate count methods can require separate traversals.
+
+A data block can contain multiple primitive groups.
+Add batch totals across these groups to calculate a complete block total.
+A batch size describes one group.
+See the [statistics example](#73-collect-statistics) for complete block maxima.
 
 ### Select entity fields
 
-Node options select IDs, latitude, longitude, tags, and metadata independently.
-Way options select tags, references, metadata, and optional node locations.
-Relation options select tags, member IDs, member types, member roles, and metadata independently.
-Ways and relations always supply their IDs during entity decoding.
+Options select output columns independently.
+Node decoding with default options supplies IDs only.
+Way and relation decoding always supplies IDs.
+All other options default to `false`.
 
-```cpp
-const bool ok = reader.read_blocks([](const input_osm::pbf_block_t& block) {
-    return block.decode_nodes(
-        {.id = true, .latitude = true, .longitude = true},
-        [](const input_osm::pbf_node_batch_t& batch) {
-            for (size_t i = 0; i < batch.count; ++i)
-                fmt::print("{} {} {}\n", batch.ids[i], batch.raw_latitudes[i], batch.raw_longitudes[i]);
-            return true;
-        });
-});
-```
+| Options type | Option | Output column |
+| --- | --- | --- |
+| `pbf_node_options_t` | `id`, default `true` | `ids`: absolute signed 64-bit IDs. |
+| `pbf_node_options_t` | `latitude` | `raw_latitudes`: signed 64-bit raw coordinates. |
+| `pbf_node_options_t` | `longitude` | `raw_longitudes`: signed 64-bit raw coordinates. |
+| `pbf_node_options_t` | `tags` | `tags`: lists of `pbf_tag_ids_t`. |
+| `pbf_node_options_t` | `metadata` | `metadata`: one `pbf_metadata_t` per node. |
+| `pbf_way_options_t` | `tags` | `tags`: lists of `pbf_tag_ids_t`. |
+| `pbf_way_options_t` | `node_refs` | `node_refs`: lists of absolute signed 64-bit node IDs. |
+| `pbf_way_options_t` | `metadata` | `metadata`: one `pbf_metadata_t` per way. |
+| `pbf_way_options_t` | `node_locations` | `node_locations`: lists of `pbf_location_t`. Also supplies `locations_present`. |
+| `pbf_relation_options_t` | `tags` | `tags`: lists of `pbf_tag_ids_t`. |
+| `pbf_relation_options_t` | `member_ids` | `member_ids`: absolute signed 64-bit member IDs. |
+| `pbf_relation_options_t` | `member_types` | `member_types`: `pbf_member_type_t::node`, `way`, or `relation`. |
+| `pbf_relation_options_t` | `member_roles` | `member_roles`: unsigned 32-bit role string IDs. |
+| `pbf_relation_options_t` | `metadata` | `metadata`: one `pbf_metadata_t` per relation. |
 
-Each callback receives spans for one primitive group.
-Selected scalar columns have `batch.count` elements.
+Ordinary nodes and dense nodes use the same `pbf_node_batch_t` type.
+Latitude decoding does not require longitude or ID output.
+Location decoding does not require node reference output.
+Relation member IDs, types, and roles have independent options.
+
+#### Batch layout
+
+Each typed batch contains `block_index`, `group_index`, `count`, `parameters`, and `fields`.
+Group indexes start at zero within each block.
+`fields` records the selected options.
+Selected scalar columns contain `count` entries.
 Unselected columns are empty.
-Variable lists use flat values and offsets. For example, `batch.tags[i]` selects one entity's tags.
-`decode_entities()` combines selections for all three entity types in one group traversal.
+Use `fields` to distinguish an unselected column from a selected column in an empty batch.
 
-Tags, user names, and member roles use string IDs.
-The reader does not check those IDs against the string table size.
-The application must check bounds before string lookup.
-`string_table_size()` returns the number of strings, including entry zero.
-`decode_strings()` calls `bool(std::string_view)` for every string in table order.
-Callback positions give implicit string IDs, starting at zero.
+Tags, way references, and way locations use `pbf_list_view_t<T>`.
+Each selected list contains `count + 1` offsets and one flat `values` span.
+The first offset is zero.
+The last offset equals `values.size()`.
+`batch.tags[i]` supplies the tags for entity `i`.
+`batch.node_refs[i]` supplies the references for way `i`.
+Use list indexing only when the corresponding field is selected.
 
-Entity spans remain valid only during their entity callback.
-String byte views remain valid until the enclosing block callback returns.
-Internal TLS buffers retain capacity for reuse.
-A nested read through another reader uses separate buffers.
-Block methods cannot be called recursively from an entity or string callback, except `index()` and `file_offset()`.
+Relation member columns share `member_offsets`.
+If any member option is selected, this span contains `count + 1` offsets.
+Relation `i` uses member indexes from `member_offsets[i]` through `member_offsets[i + 1] - 1`.
+Selected member columns preserve member order.
+The decoder checks that all three encoded member columns have equal lengths.
 
-The new metadata type preserves 64-bit timestamps and changesets, user fields, visibility, and field presence.
-Coordinates remain raw integers after delta decoding.
-Convert latitude to nanodegrees with `lat_offset + granularity * raw_latitude`.
-Use the equivalent longitude parameters for longitude.
-Convert timestamps to Unix milliseconds with `date_granularity * raw_timestamp`.
-Use arithmetic that can represent the result.
+When way locations are selected, `locations_present[i]` reports encoded location field presence.
+An absent location list is empty.
+A present list can also be empty for a way without references.
+Present latitude, longitude, and reference lists must have equal lengths.
+The decoder requires the header's `LocationsOnWays` declaration when location fields are present.
+It does not fetch coordinates from referenced nodes.
+
+#### Combined decoding
+
+`pbf_entity_options_t` contains optional `nodes`, `ways`, and `relations` selections.
+Default construction disables all three entity types.
+Assign an options object to enable an entity type.
+Use `std::nullopt` to disable it.
+Assigning `pbf_node_options_t{}` enables node IDs.
+
+`decode_entities()` calls its handler once per primitive group.
+`pbf_group_batch_t::kind` identifies `empty`, `nodes`, `dense_nodes`, `ways`, or `relations`.
+Use only the typed batch for the reported kind and an enabled entity type.
+Disabled types have empty output, even when the group contains those entities.
+An empty group can still cause a callback.
+
+The individual decode methods visit only matching groups.
+Groups and their entities retain file order within each block.
+An empty matching group can supply an empty batch.
+A block without groups supplies no entity callbacks.
+Repeated decode calls decode the selected columns again.
+For several entity types, use [combined decoding](#78-decode-several-entity-types) to reduce repeated group traversal.
+
+### Strings and entity metadata
+
+The string table belongs to one block.
+`decode_strings()` supplies every string in order, including the empty entry at index zero.
+The callback has no string ID argument.
+Its position gives the implicit ID.
+`string_table_size()` supplies the entry count without constructing a string-view array.
+
+Tags contain `pbf_tag_ids_t::key` and `value` string IDs.
+Metadata `user_sid` and relation `member_roles` also contain string IDs.
+The reader does not check these IDs against the string table size.
+Check every ID before using it for string lookup.
+The same string ID can refer to different text in different blocks.
+If only IDs are needed, omit string decoding.
+See [way tags and references](#76-decode-way-tags-and-node-references) for checked string lookup.
+
+`pbf_metadata_t::present` identifies encoded fields.
+Test the corresponding presence bit before interpreting an optional field.
+Selected metadata contains one record per entity, including entities without metadata.
+
+| Field | Type | Presence bit | Value when absent |
+| --- | --- | --- | --- |
+| `version` | `int32_t` | `version_present` | `-1` |
+| `raw_timestamp` | `int64_t` | `timestamp_present` | `0` |
+| `changeset` | `int64_t` | `changeset_present` | `0` |
+| `uid` | `int32_t` | `uid_present` | `0` |
+| `user_sid` | `uint32_t` | `user_present` | `0` |
+| `visible` | `bool` | `visible_present` | `true` |
+
+The presence bits belong to `pbf_metadata_t`.
+A clear bit distinguishes absence from an encoded default value.
+The metadata option selects all six fields together.
+
+#### Coordinate and timestamp conversion
+
+Entity batches supply `pbf_parameters_t` through `batch.parameters`.
+`block.parameters(result)` supplies the same values before entity decoding.
+The defaults are `granularity = 100`, zero coordinate offsets, and `date_granularity = 1000`.
+Use the parameters from the current block.
+
+| Converted value | Formula |
+| --- | --- |
+| Latitude in nanodegrees | `lat_offset + granularity * raw_latitude` |
+| Longitude in nanodegrees | `lon_offset + granularity * raw_longitude` |
+| Entity timestamp in Unix milliseconds | `date_granularity * raw_timestamp` |
+
+Coordinate columns and way locations contain raw values after delta decoding.
+For degrees, multiply nanodegrees by `1e-9`.
+Use arithmetic that can represent the converted result.
+Convert operands to floating point before multiplication when an approximate degree value is sufficient.
+For exact integer conversion, check multiplication and addition for overflow.
 
 ### Read header metadata
 
 Call `reader.decode_header(handler)` while the reader is idle.
-The handler receives `const pbf_header_metadata_t&` in the calling thread.
-It exposes the bounding box, feature lists, writing program, source, and all three replication fields.
+The handler receives `const pbf_header_metadata_t&`.
+The reader decodes these fields on demand after the feature checks during `open()`.
+
+| Header field | Representation and meaning |
+| --- | --- |
+| `bbox` | Optional `pbf_header_bbox_t` with signed 64-bit `left`, `right`, `top`, and `bottom` nanodegrees. |
+| `required_features` | Span of required feature string views. |
+| `optional_features` | Span of optional feature string views. |
+| `writingprogram` | Optional program name string view. |
+| `source` | Optional source string view. |
+| `osmosis_replication_timestamp` | Optional signed 64-bit Unix timestamp in seconds. |
+| `osmosis_replication_sequence_number` | Optional signed 64-bit replication sequence number. |
+| `osmosis_replication_base_url` | Optional replication URL string view. |
+
 Optional values distinguish absence from empty strings and numeric zero.
-Header views remain valid only during that callback.
-Header bounding box coordinates use nanodegrees independently of data block parameters.
+Header coordinates and replication timestamps do not use data block conversion parameters.
+Header views remain valid only during their callback.
+See the [header example](#79-read-header-fields) for presence checks.
 
 ### Read a block by index
 
 Use `read_block()` with a file block index from an earlier block callback.
-The method calls the handler once in the calling thread.
+The method calls its handler once in the calling thread, regardless of the reader's worker count.
 Header blocks, unknown block types, and unavailable indexes return `false` without a callback.
+Data block indexes can have gaps.
+Do not treat a callback count as the largest file block index.
 
-```cpp
-input_osm::pbf_reader_t reader;
-if (!reader.open("map.osm.pbf")) return 1;
-if (!reader.build_index()) return 1;
-const bool ok = reader.read_block(100, [](const input_osm::pbf_block_t& block) {
-    size_t count;
-    if (!block.node_count(count)) return false;
-    fmt::print("Block {} has {} nodes\n", block.index(), count);
-    return true;
-});
-```
+| Access mode | Setup and cost |
+| --- | --- |
+| Without an index | Each request scans earlier file block headers and skips their payloads. No offset table is allocated. |
+| With `build_index()` | Scan all file block headers once. Subsequent requests use the selected offset directly. |
 
-`build_index()` is optional.
-Without it, each request scans earlier file block headers and skips their payloads.
-With it, the reader uses an in-memory offset table.
-`index_memory_bytes()` reports allocated index capacity.
 Each reader keeps its own offset table.
-Index construction validates framing without decoding data payloads.
+The table stores a 64-bit offset for each file block, including the header and unknown block types.
+`index_memory_bytes()` includes unused allocated capacity.
+Index construction checks file framing without decoding data payloads.
+An index does not cache decoded blocks or accelerate `read_blocks()`.
+Use an index for repeated random requests when its setup and memory costs are acceptable.
+For occasional requests, compare both modes with the [benchmark tools](test/benchmark/README.md).
+See the [random access example](#710-read-selected-blocks).
+
+### Validation, failures, and data lifetime
+
+A block callback can succeed without inspecting its compressed payload.
+Count queries inspect only the structures needed for those counts.
+Selective decoding checks selected fields and their structural dependencies.
+It does not fully validate unrequested fields.
+
+Use `block.validate()` when all supported entity encodings must be checked.
+This method also checks the string table structure.
+It does not check entity string IDs against the string table size.
+It does not check whether referenced OSM entities exist.
+Validation requires decoding work and can remove the speed benefit of selective access.
+
+A failed block method marks the current block operation as failed.
+Ignoring that failure does not make the enclosing read succeed.
+Return each decode result from the block callback.
+Callback exceptions become operation failures.
+With multiple workers, callbacks that already started can finish during cancellation.
+All workers stop before the read method returns.
+
+| Borrowed object | Valid until |
+| --- | --- |
+| `pbf_block_t` reference | Its block callback returns. |
+| Entity batch, column spans, and list views | Their entity callback returns. |
+| String bytes from `decode_strings()` | The enclosing block callback returns. |
+| Header spans and string views | The header callback returns. |
+
+Copy entity data into application storage before its entity callback returns.
+Copy strings into `std::string` when they must survive their permitted lifetime.
+Copying a span or string view does not copy its data.
+Do not send a borrowed block or batch to another thread.
+For asynchronous processing, copy the required values first.
+
+Call string decoding before entity decoding when callbacks need string lookup.
+Do not call methods on the same block from its entity or string callback.
+`index()` and `file_offset()` are the exceptions.
+Use `batch.parameters` inside an entity callback.
+Internal thread-local buffers retain capacity for reuse.
+Larger groups can require further buffer allocations.
+A nested read through another reader uses separate internal buffers.
 
 ### Migrate to version 0.4.0
 
 The opaque block replaces the eager block structure.
 Rebuild direct block consumers with the new headers and library.
+Replace the removed `input_pbf_blocks()` function with `pbf_reader_t::open()` and `read_blocks()`.
 
 1. Remove the metadata argument from `read_blocks()` and `read_block()`.
 2. Replace entity span sizes with count methods.
@@ -421,10 +623,11 @@ The callback type is `void (*)(log_level_t, const char*)`.
 
 ### Data lifetime
 
-Use the spans and their data only during the callback that receives them.
-This limit includes tag strings and relation roles.
+For `input_file()`, use entity spans and their data only during the callback that receives them.
+This limit includes tag strings and relation roles in legacy entity records.
 To use data after the callback returns, copy the data into memory that your application owns.
 A copy of a structure alone does not copy the data to which its spans and string views refer.
+For the block API, use the [lifetime table](#validation-failures-and-data-lifetime).
 
 ### Concurrent access
 
@@ -451,12 +654,35 @@ The public package does not install this header.
 
 ## 7. Examples
 
+The PBF helpers below use these headers:
+
+```cpp
+#include <inputosm/inputosm.h>
+#include <cstdint>
+#include <span>
+#include <string_view>
+#include <vector>
+#include <fmt/format.h>
+```
+
+Helpers that accept `pbf_reader_t&` require an open reader.
+Call `reader.open(path)` before calling those helpers.
+Call `reader.set_max_thread_count()` to enable multiple workers.
+Check the returned Boolean result.
+Link the application to `inputosm::inputosm` and `fmt::fmt`.
+
+Examples: [entity counts](#71-count-entities), [statistics](#73-collect-statistics), [block counts](#74-count-data-blocks),
+[node positions](#75-decode-node-ids-and-positions), [way tags](#76-decode-way-tags-and-node-references),
+[relations](#77-decode-relations-with-all-fields), [combined decoding](#78-decode-several-entity-types),
+[header fields](#79-read-header-fields), and [random access](#710-read-selected-blocks).
+See [best practices](#711-best-practices) for field selection, storage, and threads.
+
 ### 7.1 Count entities
 
-The example in `test/integration/count_entity.cpp` uses a different counter for each thread and entity type.
+The [count_entity program](test/integration/count_entity.cpp) uses a different counter for each thread and entity type.
 It uses `pbf_reader_t::read_blocks()` and `block.counts()` to count nodes, ways, and relations in one group traversal.
 It does not construct entity arrays or decode metadata.
-The `Counter` type is in `test/integration/counter.h`.
+The example below uses aligned worker storage to reduce cache contention.
 Displayed counts use fixed comma groups, such as `10,846,489,004`.
 IDs and CSV numbers do not use comma groups.
 The output uses fmt and does not require system locale settings.
@@ -468,22 +694,40 @@ time ./build/test/integration/count_entity path/to/planet.osm.pbf
 ```
 
 ```cpp
-input_osm::pbf_reader_t reader;
-reader.set_max_thread_count();
-const auto threads = reader.thread_count();
-std::vector<input_osm::Counter<uint64_t>> counters(3 * threads);
-auto nodes = std::span{counters.data(), threads};
-auto ways  = std::span{counters.data() + threads, threads};
-auto rels  = std::span{counters.data() + 2 * threads, threads};
+bool count_entities(const char* path)
+{
+    input_osm::pbf_reader_t reader;
+    reader.set_max_thread_count();
+    if (!reader.open(path)) return false;
+    struct alignas(64) totals_t
+    {
+        uint64_t nodes = 0, ways = 0, relations = 0;
+    };
+    std::vector<totals_t> workers(reader.thread_count());
+    if (!reader.read_blocks([&](const input_osm::pbf_block_t& block) {
+            input_osm::pbf_counts_t counts;
+            if (!block.counts(counts)) return false;
+            auto& totals = workers[input_osm::thread_index];
+            totals.nodes += counts.nodes;
+            totals.ways += counts.ways;
+            totals.relations += counts.relations;
+            return true;
+        }))
+        return false;
 
-const bool ok = reader.open(file) && reader.read_blocks([&](const input_osm::pbf_block_t& block) {
-    input_osm::pbf_counts_t counts;
-    if (!block.counts(counts)) return false;
-    nodes[input_osm::thread_index] += counts.nodes;
-    ways[input_osm::thread_index] += counts.ways;
-    rels[input_osm::thread_index] += counts.relations;
+    totals_t result;
+    for (const auto& worker : workers)
+    {
+        result.nodes += worker.nodes;
+        result.ways += worker.ways;
+        result.relations += worker.relations;
+    }
+    fmt::print("Nodes: {} Ways: {} Relations: {}\n",
+               fmt::group_digits(result.nodes),
+               fmt::group_digits(result.ways),
+               fmt::group_digits(result.relations));
     return true;
-});
+}
 ```
 
 ### 7.2 Set a log callback
@@ -532,6 +776,298 @@ Add the optional argument to decode metadata:
 Timestamp maxima use 64-bit values and each block's `date_granularity`.
 The program displays Unix time in whole seconds with the GMT suffix.
 Without metadata, timestamp maxima remain at the Unix epoch.
+
+### 7.4 Count data blocks
+
+This example counts data callbacks without decompressing data payloads.
+It uses one thread because the callback only increments a counter.
+The count excludes the header and unknown block types.
+
+```cpp
+bool count_data_blocks(const char* path)
+{
+    input_osm::pbf_reader_t reader;
+    if (!reader.open(path)) return false;
+    uint64_t count = 0;
+    if (!reader.read_blocks([&](const input_osm::pbf_block_t&) {
+            ++count;
+            return true;
+        }))
+        return false;
+    fmt::print("Data blocks: {}\n", count);
+    return true;
+}
+```
+
+The [count_blocks program](test/integration/count_blocks.cpp) also demonstrates separate counters with multiple workers.
+
+### 7.5 Decode node IDs and positions
+
+This example selects IDs, latitude, and longitude.
+It handles ordinary and dense nodes through the same callback.
+The calculation uses floating point before multiplication to avoid integer overflow.
+
+```cpp
+bool read_node_positions(input_osm::pbf_reader_t& reader)
+{
+    return reader.read_blocks([](const input_osm::pbf_block_t& block) {
+        return block.decode_nodes(
+            {.id = true, .latitude = true, .longitude = true},
+            [](const input_osm::pbf_node_batch_t& batch) {
+                const auto& p = batch.parameters;
+                for (size_t i = 0; i < batch.count; ++i)
+                {
+                    const double latitude =
+                        (double(p.lat_offset) + double(p.granularity) * double(batch.raw_latitudes[i])) * 1e-9;
+                    const double longitude =
+                        (double(p.lon_offset) + double(p.granularity) * double(batch.raw_longitudes[i])) * 1e-9;
+                    fmt::print("{} {:.7f} {:.7f}\n", batch.ids[i], latitude, longitude);
+                }
+                return true;
+            });
+    });
+}
+```
+
+For latitude alone, select `{.id = false, .latitude = true}`.
+The `ids` and `raw_longitudes` spans then remain empty.
+
+### 7.6 Decode way tags and node references
+
+This example constructs a string-view table for each block that contains ways.
+It checks string IDs before lookup.
+Each worker reuses its own vector capacity across blocks.
+The vectors belong to this operation, so separate readers do not share application buffers.
+
+```cpp
+bool read_way_tags(input_osm::pbf_reader_t& reader)
+{
+    std::vector<std::vector<std::string_view>> tables(reader.thread_count());
+    return reader.read_blocks([&](const input_osm::pbf_block_t& block) {
+        size_t ways = 0;
+        if (!block.way_count(ways)) return false;
+        if (ways == 0) return true;
+
+        auto& strings = tables[input_osm::thread_index];
+        strings.clear();
+        const bool ok = block.decode_strings([&](std::string_view value) {
+            strings.push_back(value);
+            return true;
+        }) && block.decode_ways(
+            {.tags = true, .node_refs = true},
+            [&](const input_osm::pbf_way_batch_t& batch) {
+                for (size_t i = 0; i < batch.count; ++i)
+                {
+                    fmt::print("Way {}\n", batch.ids[i]);
+                    for (const auto tag : batch.tags[i])
+                    {
+                        if (tag.key >= strings.size() || tag.value >= strings.size()) return false;
+                        fmt::print("  {}={}\n", strings[tag.key], strings[tag.value]);
+                    }
+                    for (const auto id : batch.node_refs[i])
+                        fmt::print("  Node {}\n", id);
+                }
+                return true;
+            });
+        strings.clear();
+        return ok;
+    });
+}
+```
+
+The preliminary way count avoids string decoding in blocks without ways.
+It adds a count traversal in blocks with ways.
+Measure this tradeoff for the input file.
+
+For a known capacity requirement, call `string_table_size(size)` before `decode_strings()`.
+Then use `strings.reserve(size)`.
+The initial size query scans the string table.
+Without that requirement, vector growth avoids the preliminary string scan.
+
+To request optional way coordinates, also set `.node_locations = true`.
+Check `batch.locations_present[i]` before using `batch.node_locations[i]`.
+Each location contains `raw_latitude` and `raw_longitude`.
+Convert them with `batch.parameters`, as in the node example.
+Copy required references into an owned vector before the entity callback returns.
+
+### 7.7 Decode relations with all fields
+
+This example selects tags, all member columns, and metadata.
+It prints string IDs without string lookup.
+For role text, construct the block's string table before entity decoding.
+Check each role ID before lookup.
+
+```cpp
+bool read_relations(input_osm::pbf_reader_t& reader)
+{
+    return reader.read_blocks([](const input_osm::pbf_block_t& block) {
+        return block.decode_relations(
+            {.tags = true, .member_ids = true, .member_types = true,
+             .member_roles = true, .metadata = true},
+            [](const input_osm::pbf_relation_batch_t& batch) {
+                for (size_t i = 0; i < batch.count; ++i)
+                {
+                    fmt::print("Relation {}\n", batch.ids[i]);
+                    for (const auto tag : batch.tags[i])
+                        fmt::print("  Tag IDs {}={}\n", tag.key, tag.value);
+                    const size_t begin = batch.member_offsets[i];
+                    const size_t end = batch.member_offsets[i + 1];
+                    for (size_t j = begin; j < end; ++j)
+                        fmt::print("  Member {} type={} role_sid={}\n",
+                                   batch.member_ids[j],
+                                   static_cast<unsigned>(batch.member_types[j]),
+                                   batch.member_roles[j]);
+
+                    const auto& metadata = batch.metadata[i];
+                    if (metadata.present & input_osm::pbf_metadata_t::timestamp_present)
+                    {
+                        const long double seconds =
+                            static_cast<long double>(metadata.raw_timestamp) *
+                            batch.parameters.date_granularity / 1000.0L;
+                        fmt::print("  Unix timestamp: {:.3f} seconds\n", seconds);
+                    }
+                    if (metadata.present & input_osm::pbf_metadata_t::user_present)
+                        fmt::print("  User string ID: {}\n", metadata.user_sid);
+                }
+                return true;
+            });
+    });
+}
+```
+
+The remaining metadata fields are available in each `metadata` record.
+Check their presence bits before use.
+Setting `.metadata = false` removes the metadata column and its decoding work.
+
+### 7.8 Decode several entity types
+
+This helper selects all entity columns in one group traversal.
+Its `with_metadata` argument controls metadata for all three types.
+The application supplies a `pbf_group_handler_t` callback to process each group.
+
+```cpp
+bool read_all_columns(input_osm::pbf_reader_t& reader,
+                      bool with_metadata,
+                      const input_osm::pbf_group_handler_t& process_group)
+{
+    const input_osm::pbf_entity_options_t options{
+        .nodes = input_osm::pbf_node_options_t{
+            .id = true, .latitude = true, .longitude = true,
+            .tags = true, .metadata = with_metadata},
+        .ways = input_osm::pbf_way_options_t{
+            .tags = true, .node_refs = true, .metadata = with_metadata,
+            .node_locations = true},
+        .relations = input_osm::pbf_relation_options_t{
+            .tags = true, .member_ids = true, .member_types = true,
+            .member_roles = true, .metadata = with_metadata}};
+
+    return reader.read_blocks([&](const input_osm::pbf_block_t& block) {
+        return block.decode_entities(options, process_group);
+    });
+}
+```
+
+In `process_group`, inspect `group.kind` before accessing `group.nodes`, `group.ways`, or `group.relations`.
+Both `nodes` and `dense_nodes` kinds use `group.nodes`.
+An `empty` group has no entity data.
+The [statistics program](test/integration/statistics.cpp) shows this dispatch.
+For a smaller field selection, change the options before the traversal.
+If a type is not needed, leave its optional selection absent.
+
+### 7.9 Read header fields
+
+This example prints all header fields with presence checks.
+Replication timestamps already use Unix seconds.
+
+```cpp
+bool print_header(input_osm::pbf_reader_t& reader)
+{
+    return reader.decode_header([](const input_osm::pbf_header_metadata_t& header) {
+        if (header.bbox)
+        {
+            const auto& box = *header.bbox;
+            fmt::print("Bounds in nanodegrees: left={} right={} top={} bottom={}\n",
+                       box.left, box.right, box.top, box.bottom);
+        }
+        for (const auto feature : header.required_features)
+            fmt::print("Required feature: {}\n", feature);
+        for (const auto feature : header.optional_features)
+            fmt::print("Optional feature: {}\n", feature);
+        if (header.writingprogram) fmt::print("Program: {}\n", *header.writingprogram);
+        if (header.source) fmt::print("Source: {}\n", *header.source);
+        if (header.osmosis_replication_timestamp)
+            fmt::print("Replication timestamp: {}\n", *header.osmosis_replication_timestamp);
+        if (header.osmosis_replication_sequence_number)
+            fmt::print("Replication sequence: {}\n", *header.osmosis_replication_sequence_number);
+        if (header.osmosis_replication_base_url)
+            fmt::print("Replication URL: {}\n", *header.osmosis_replication_base_url);
+        return true;
+    });
+}
+```
+
+### 7.10 Read selected blocks
+
+Supply data block indexes recorded from `block.index()` during an earlier traversal.
+This helper supports both random access modes.
+It uses a fresh reader so `use_index = false` starts without an offset table.
+
+```cpp
+bool read_selected_blocks(const char* path,
+                          std::span<const size_t> indexes,
+                          bool use_index)
+{
+    input_osm::pbf_reader_t reader;
+    if (!reader.open(path)) return false;
+    if (use_index && !reader.build_index()) return false;
+    fmt::print("Index capacity: {} bytes\n", reader.index_memory_bytes());
+
+    for (const auto index : indexes)
+    {
+        if (!reader.read_block(index, [](const input_osm::pbf_block_t& block) {
+                input_osm::pbf_counts_t counts;
+                if (!block.counts(counts)) return false;
+                fmt::print("Block {} at byte {}: {} nodes, {} ways, {} relations\n",
+                           block.index(), block.file_offset(),
+                           counts.nodes, counts.ways, counts.relations);
+                return true;
+            }))
+            return false;
+    }
+    return true;
+}
+```
+
+For concurrent random requests, give each application thread its own reader.
+Open all readers before processing requests to share the file mapping.
+Build each reader's index when indexed access is needed.
+`read_block()` uses `thread_index == 0` within each reader's callback.
+Keep results separate for each application thread.
+Setting the reader worker count does not parallelize a random request.
+
+### 7.11 Best practices
+
+- Select only the fields that the application uses.
+- For block counts, count callbacks without calling payload methods.
+- For all entity counts, use `counts()`.
+- For one entity count, use its individual count method.
+- For several entity types, use `decode_entities()` with one group traversal.
+- Use the typed decode methods when only one entity type is needed.
+- Decode strings only when the application needs text.
+- Check string ID bounds before lookup.
+- Process borrowed spans during their callback.
+- Keep reusable application buffers separate for each reader and worker.
+- Add group totals within each block before calculating block maxima.
+- Use separate worker counters during iteration.
+- Combine worker results after `read_blocks()` returns.
+- Set thread and log configuration before operations start.
+- Compare indexed and unindexed access for the expected random request count.
+- Measure performance with the actual field selection and file.
+
+The printing examples show field access.
+Printing each entity can dominate execution time.
+For throughput measurements, replace printing with the required batch processing.
+Use one worker when output must follow file order.
 
 ## 8. Logs and diagnostics
 
@@ -640,8 +1176,10 @@ For XML input, multiply `raw_latitude` and `raw_longitude` by `1e-7`.
 For example, use `double lat = raw_latitude * 1e-7;`.
 
 For PBF input, the reader gives the raw coordinate integers.
-The same conversion applies when the granularity is 100 nanodegrees and the coordinate offsets are zero.
-Make sure that your source data has these properties before you use that conversion.
+With the block API, use `batch.parameters` and the [conversion formulas](#coordinate-and-timestamp-conversion).
+The fixed `1e-7` conversion applies only when granularity is 100 nanodegrees and coordinate offsets are zero.
+The legacy `input_file()` records do not expose those parameters.
+Check the source data before using that fixed conversion with legacy PBF records.
 
 ### How do I read OSC changes?
 
@@ -652,9 +1190,11 @@ The XML `delete` operation uses `mode_t::destroy`.
 
 ### How do I use a relation with many members?
 
-Read the members through `relation_t::members` during the callback.
+With `input_file()`, read members through `relation_t::members` during the callback.
 To use the members after the callback, copy them and their role strings before the callback returns.
 The size limit for `relation_t` does not limit the number of members.
+With the block API, use selected member columns and `member_offsets`.
+See the [relation example](#77-decode-relations-with-all-fields).
 
 ## 12. Contribute
 
