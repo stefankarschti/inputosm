@@ -20,7 +20,6 @@
 #include <unordered_map>
 #include <cstring>
 #include <vector>
-#include <mutex>
 
 int main(int argc, char **argv)
 {
@@ -97,7 +96,8 @@ int main(int argc, char **argv)
     }
     fmt::print("{} unique nodes used by ferries\n", fmt::group_digits(node_coord.size()));
     fmt::print("retrieving ferry node coordinates...\n");
-    std::mutex coordinate_mutex;
+    // The input must contain one node record for each node ID.
+    // Each worker updates different map elements.
     if (!reader.read_blocks([&](const input_osm::pbf_block_t &block) {
             return block.decode_nodes({true, true, true, false, false}, [&](const input_osm::pbf_node_batch_t &batch) {
                 for (size_t i = 0; i < batch.count; ++i)
@@ -105,7 +105,6 @@ int main(int argc, char **argv)
                     const auto it = node_coord.find(batch.ids[i]);
                     if (it != node_coord.end())
                     {
-                        std::lock_guard lock(coordinate_mutex);
                         it->second = {batch.raw_longitudes[i], batch.raw_latitudes[i]};
                     }
                 }
