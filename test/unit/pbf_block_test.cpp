@@ -1,6 +1,6 @@
-#include <inputosm/inputosm.h>
-#include "pbf_test_data.h"
-#include "pbf_eager_test_view.h"
+#include <inputosm/inputosm.hpp>
+#include "pbf_test_data.hpp"
+#include "pbf_eager_test_view.hpp"
 
 #include <algorithm>
 #include <array>

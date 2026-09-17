@@ -78,7 +78,7 @@ def main():
         target = output / f"{label}-benchmark"
         shutil.copy2(source, target)
         binaries[label] = str(target.resolve())
-    source_files = [Path("src/inputosmpbf.cpp"), Path("src/pbfcolumns.h"), Path("include/inputosm/inputosm.h"),
+    source_files = [Path("src/inputosmpbf.cpp"), Path("src/pbfcolumns.hpp"), Path("include/inputosm/inputosm.hpp"),
                     Path("test/benchmark/pbf_benchmark.cpp")]
     manifest = {"input": str(Path(args.input).resolve()), "file_size": os.stat(args.input).st_size,
                 "input_mtime_ns": os.stat(args.input).st_mtime_ns, "platform": platform.platform(),

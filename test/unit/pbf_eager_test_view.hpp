@@ -1,6 +1,6 @@
 #pragma once
 
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 #include <deque>
 #include <limits>
 #include <stdexcept>

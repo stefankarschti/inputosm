@@ -1,6 +1,6 @@
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 
-#include "test_utils.h"
+#include "test_utils.hpp"
 
 #include <algorithm>
 #include <cstdint>

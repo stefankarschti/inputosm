@@ -1,4 +1,4 @@
-#include "inputosmlog.h"
+#include "inputosmlog.hpp"
 
 #include <cstring>
 #include <cstdlib>

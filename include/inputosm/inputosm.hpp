@@ -1,4 +1,4 @@
-// Copyright 2021-2022 Stefan Karschti
+// Copyright 2021-2026 Stefan Karschti
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -11,8 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef INPUTOSM_H
-#define INPUTOSM_H
+#pragma once
 
 #include <span>
 #include <string_view>
@@ -360,5 +359,3 @@ extern mode_t osc_mode;
 extern file_type_t file_type;
 
 } // namespace input_osm
-
-#endif // !INPUTOSM_H

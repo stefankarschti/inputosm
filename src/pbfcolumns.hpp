@@ -1,3 +1,5 @@
+#pragma once
+
 // Private decoding helpers. Include this file inside the PBF implementation namespace.
 
 uint32_t string_id(uint64_t value)

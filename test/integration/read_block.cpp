@@ -1,4 +1,4 @@
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 
 #include <cstdio>
 #include <cstdlib>

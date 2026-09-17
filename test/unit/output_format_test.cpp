@@ -1,5 +1,5 @@
-#include "inputosmlog.h"
-#include "timeutil.h"
+#include "inputosmlog.hpp"
+#include "timeutil.hpp"
 
 #include <cstdio>
 #include <cstdlib>

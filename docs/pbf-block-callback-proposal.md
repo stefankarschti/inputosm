@@ -24,7 +24,7 @@ The review used repository revision `3e05a74`.
 
 | Location | Previous behavior | Required change |
 | --- | --- | --- |
-| [inputosm.h](../include/inputosm/inputosm.h), `input_file()` | Accepts three entity handlers. | Add a separate function with one block handler. |
+| [inputosm.hpp](../include/inputosm/inputosm.hpp), `input_file()` | Accepts three entity handlers. | Add a separate function with one block handler. |
 | [inputosm.cpp](../src/inputosm.cpp), `input_file()` | Stores handlers and metadata configuration in global variables. | Keep new callback state in the read operation. |
 | [inputosmpbf.cpp](../src/inputosmpbf.cpp), `input_mem()` | Adds all file blocks to a static queue before processing. | Use a queue that belongs to the read operation. |
 | `handle_blob()` | Reads raw data or decompresses Zlib data. | Retain these two input forms. |
@@ -58,7 +58,7 @@ It does not receive compressed bytes, Protocol Buffers messages, or one callback
 
 ## 4. Public API
 
-Update the shared entity declarations in `include/inputosm/inputosm.h`.
+Update the shared entity declarations in `include/inputosm/inputosm.hpp`.
 Add the block API declarations to the same header.
 The relevant public declarations become:
 
@@ -325,7 +325,7 @@ Headers do not produce block callbacks.
 This example counts all entities with ordered callbacks:
 
 ```cpp
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -708,7 +708,7 @@ These features need separate use cases before API expansion.
 
 | File | Planned change |
 | --- | --- |
-| `include/inputosm/inputosm.h` | Use `<string_view>` and `<span>`. Update shared types and `input_file()`. Add the block API declarations and comments. |
+| `include/inputosm/inputosm.hpp` | Use `<string_view>` and `<span>`. Update shared types and `input_file()`. Add the block API declarations and comments. |
 | `include/inputosm/span.h` | Remove the header, custom span type, and helper. |
 | `src/inputosmpbf.cpp` | Remove `string_table_t`. Use a direct view vector. Add block storage, dispatch, the new entry point, and read operation state. |
 | `src/inputosm.cpp` | Update handler storage and `input_file()` parameters to standard spans. Adapt private PBF dispatch where necessary. |

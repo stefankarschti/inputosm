@@ -1,5 +1,5 @@
-#include <inputosm/inputosm.h>
-#include "pbf_test_data.h"
+#include <inputosm/inputosm.hpp>
+#include "pbf_test_data.hpp"
 
 #include <atomic>
 #include <cstdio>

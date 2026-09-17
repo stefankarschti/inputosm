@@ -57,14 +57,14 @@ endif()
 
 # Specify the source files.
 set(SOURCES
-    "include/inputosm/inputosm.h"
+    "include/inputosm/inputosm.hpp"
     "src/inputosm.cpp"
     "src/inputosmpbf.cpp"
-    "src/pbfcolumns.h"
+    "src/pbfcolumns.hpp"
     "src/inputosmxml.cpp"
-    "src/timeutil.h"
+    "src/timeutil.hpp"
     "src/timeutil.cpp"
-    "src/inputosmlog.h"
+    "src/inputosmlog.hpp"
     "src/inputosmlog.cpp"
 )
 

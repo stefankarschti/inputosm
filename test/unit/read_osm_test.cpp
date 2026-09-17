@@ -1,4 +1,4 @@
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include <vector>
 #include <span>
 
-#include "test_utils.h"
+#include "test_utils.hpp"
 
 namespace
 {

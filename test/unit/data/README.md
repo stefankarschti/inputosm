@@ -33,5 +33,5 @@ osmium check-refs -r test/unit/data/ordinary.osm.pbf
 The C++ test specifies expected entity values independently of the decoder.
 It also creates temporary PBF messages for field order, split arrays, string table layout, and block parameters.
 Other temporary cases cover long strings, storage growth, malformed input, cancellation, and callback exceptions.
-The helper in `../pbf_test_data.h` supplies only test encoding operations.
+The helper in `../pbf_test_data.hpp` supplies only test encoding operations.
 It does not use the library decoder to construct expected values.

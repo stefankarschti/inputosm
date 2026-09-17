@@ -1,5 +1,5 @@
-#include "counter.h"
-#include <inputosm/inputosm.h>
+#include "counter.hpp"
+#include <inputosm/inputosm.hpp>
 
 #include <cstdint>
 #include <cstdlib>

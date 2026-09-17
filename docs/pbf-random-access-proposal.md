@@ -54,7 +54,7 @@ The following API uses both additional choices.
 
 | Location | Previous behavior | Required change |
 | --- | --- | --- |
-| [inputosm.h](../include/inputosm/inputosm.h), `pbf_block_t` | Supplies the index, file offset, entity spans, string table, and conversion parameters. | Keep this block type and its field meanings. |
+| [inputosm.hpp](../include/inputosm/inputosm.hpp), `pbf_block_t` | Supplies the index, file offset, entity spans, string table, and conversion parameters. | Keep this block type and its field meanings. |
 | `input_pbf_blocks()` | Opens a file and calls a handler for each data block. | Replace the free function with `pbf_reader_t::read_blocks()` on an open reader. |
 | [inputosmpbf.cpp](../src/inputosmpbf.cpp), `mapping_t` | Maps a regular file for one sequential operation. | Keep a mapping for the reader lifetime. |
 | `read_descriptor()` | Checks the length prefix and `BlobHeader`. Gets the Blob span without decoding its payload. | Use it for each request's scan. |
@@ -101,7 +101,7 @@ A new export can have different block boundaries even when its entities are the 
 
 ## Public API
 
-Add these declarations to `include/inputosm/inputosm.h`.
+Add these declarations to `include/inputosm/inputosm.hpp`.
 The new API replaces the free `input_pbf_blocks()` declaration and implementation.
 The existing declarations for `pbf_block_t` and `pbf_block_handler_t` remain applicable.
 The private implementation keeps mapping and decoder types out of the public header.
@@ -175,7 +175,7 @@ This change requires source changes and a rebuild for applications that use `inp
 6. Rebuild the application with the new headers and library.
 
 ```cpp
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 
 bool process_all_blocks(
     const char* filename,
@@ -367,7 +367,7 @@ The example accepts an index that the application obtained from an earlier block
 Both operations must use the same file contents.
 
 ```cpp
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 
 bool count_selected_block(
     const char* filename,
@@ -646,12 +646,12 @@ The saved-index option must define that tradeoff before implementation.
 
 | Planned file | Change |
 | --- | --- |
-| `include/inputosm/inputosm.h` | Add `pbf_reader_t`, both read methods, and member thread configuration. Remove the free block input declaration. |
+| `include/inputosm/inputosm.hpp` | Add `pbf_reader_t`, both read methods, and member thread configuration. Remove the free block input declaration. |
 | `src/inputosmpbf.cpp` | Move block input into the reader. Implement `input_pbf()` through `read_blocks()`. Remove the separate entity input path. |
 | `src/inputosm.cpp` | Keep the `input_file()` dispatch to `input_pbf()` and the existing handler configuration. |
 | `test/unit/pbf_block_test.cpp` | Migrate sequential block tests to `read_blocks()`. Update entity tests for the adapter contract. |
 | `test/unit/pbf_reader_test.cpp` | Add focused random access tests. |
-| `test/unit/pbf_test_data.h` | Reuse existing raw, Zlib, and unknown-type fixture helpers. Extend them only where necessary. |
+| `test/unit/pbf_test_data.hpp` | Reuse existing raw, Zlib, and unknown-type fixture helpers. Extend them only where necessary. |
 | `test/unit/CMakeLists.txt` | Register the new test. |
 | `test/integration/read_block.cpp` | Add an example that reads one block by index. |
 | `test/integration/count_blocks.cpp` | Replace the free function with reader construction, open, and `read_blocks()`. |

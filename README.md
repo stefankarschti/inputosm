@@ -45,7 +45,7 @@ It accepts PBF and XML input.
 For PBF counts without entity decoding, use the [block API example](#71-count-entities).
 
 ```cpp
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 #include <cstdint>
 #include <fmt/format.h>
 #include <cstdio>
@@ -219,7 +219,7 @@ cmake -S . -B build -DINPUTOSM_INTEGRATION_TESTS=OFF -DENABLE_CLANG_TIDY=OFF
 ## 6. API description
 
 The public application programming interface (API) uses the `input_osm` namespace.
-The declarations are in [inputosm.h](include/inputosm/inputosm.h).
+The declarations are in [inputosm.hpp](include/inputosm/inputosm.hpp).
 
 | Interface | Use |
 | --- | --- |
@@ -566,6 +566,7 @@ A nested read through another reader uses separate internal buffers.
 
 The opaque block replaces the eager block structure.
 Rebuild direct block consumers with the new headers and library.
+Replace `<inputosm/inputosm.h>` with `<inputosm/inputosm.hpp>` in application includes.
 Replace the removed `input_pbf_blocks()` function with `pbf_reader_t::open()` and `read_blocks()`.
 
 1. Remove the metadata argument from `read_blocks()` and `read_block()`.
@@ -648,7 +649,7 @@ Set log configuration before concurrent operations start.
 
 ### Internal time functions
 
-The file `src/timeutil.h` declares internal functions such as `now_ms()`, `now_us()`, `str_to_timestamp()`, and `timestamp_to_str()`.
+The file `src/timeutil.hpp` declares internal functions such as `now_ms()`, `now_us()`, `str_to_timestamp()`, and `timestamp_to_str()`.
 These functions do not use the `input_osm` namespace.
 The public package does not install this header.
 
@@ -657,7 +658,7 @@ The public package does not install this header.
 The PBF helpers below use these headers:
 
 ```cpp
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 #include <cstdint>
 #include <span>
 #include <string_view>

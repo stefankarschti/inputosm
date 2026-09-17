@@ -1,4 +1,8 @@
+#if defined(INPUTOSM_BENCH_BASELINE) || defined(INPUTOSM_BENCH_READER_BASELINE)
 #include <inputosm/inputosm.h>
+#else
+#include <inputosm/inputosm.hpp>
+#endif
 
 #include <algorithm>
 #include <atomic>
