@@ -2,7 +2,7 @@
 
 include(CMakeFindDependencyMacro)
 find_dependency(EXPAT)
-find_dependency(ZLIB 1.2.9)
+find_dependency(libdeflate 1.26 CONFIG)
 find_dependency(Threads)
 find_dependency(fmt 12.2.0 CONFIG)
 

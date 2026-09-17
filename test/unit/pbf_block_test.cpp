@@ -575,6 +575,75 @@ void growth_test(files_t& files)
     CHECK(called);
 }
 
+void compression_test(files_t& files)
+{
+    const std::string empty_stream("\x78\x9c\x03\x00\x00\x00\x00\x01", 8);
+    const auto empty_header = file_block("OSMHeader", integer(2, 0) + message(3, empty_stream));
+    const auto header_payload = message(4, "OsmSchema-V0.6") + message(4, "DenseNodes");
+    const auto compressed_header = file_block(
+        "OSMHeader", integer(2, header_payload.size()) + message(3, compressed(header_payload)));
+    const std::array<size_t, 6> sizes{65536, 0, 8, 131072, 1, 1024};
+    std::string blocks;
+    for (size_t i = 0; i < sizes.size(); ++i)
+    {
+        const std::string value(sizes[i], static_cast<char>('a' + i));
+        const auto payload = table({"", "key", value}) +
+                             message(2, message(1, node(i + 1) + packed(2, {1}) + packed(3, {2})));
+        blocks += zlib_block(payload);
+    }
+    for (const auto& prefix : {empty_header, compressed_header})
+    {
+        const auto path = files.write(prefix + blocks);
+        for (size_t threads : {1, 4})
+        {
+            set_thread_count(threads);
+            std::atomic<size_t> calls{0};
+            CHECK(input_pbf_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+                CHECK(block.nodes.size() == 1);
+                const auto index = static_cast<size_t>(block.nodes[0].id - 1);
+                CHECK(index < sizes.size());
+                CHECK(block.nodes[0].tags.size() == 1);
+                CHECK(block.nodes[0].tags[0].value == std::string(sizes[index], static_cast<char>('a' + index)));
+                ++calls;
+                return true;
+            }));
+            CHECK(calls == sizes.size());
+        }
+    }
+
+    const auto payload = primitive(message(1, node(2)));
+    const auto encoded = compressed(payload);
+    auto damaged = encoded;
+    damaged.back() ^= 1;
+    const std::vector<std::string> invalid{
+        integer(2, payload.size() - 1) + message(3, encoded),
+        integer(2, payload.size() + 1) + message(3, encoded),
+        integer(2, payload.size()) + message(3, damaged),
+        integer(2, payload.size()) + message(3, encoded.substr(0, encoded.size() - 1)),
+        integer(2, payload.size()) + message(3, encoded + "x"),
+        integer(2, payload.size()) + message(3, encoded + empty_stream),
+    };
+    const auto large = table({"", std::string(131072, 'x')}) + message(2, message(1, node(1)));
+    for (const auto& blob : invalid)
+    {
+        const auto path = files.write(compressed_header + zlib_block(large) + file_block("OSMData", blob));
+        for (size_t threads : {1, 4})
+        {
+            set_thread_count(threads);
+            std::atomic<size_t> calls{0};
+            CHECK(!input_pbf_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+                CHECK(block.nodes.size() == 1 && block.nodes[0].id == 1);
+                ++calls;
+                return true;
+            }));
+            CHECK(calls <= 1);
+            if (threads == 1) CHECK(calls == 1);
+        }
+    }
+    const auto incorrect_header = files.write(file_block("OSMHeader", integer(2, 1) + message(3, empty_stream)));
+    CHECK(!input_pbf_blocks(incorrect_header.c_str(), false, keep_block));
+}
+
 void error_test(files_t& files)
 {
     set_thread_count(1);
@@ -884,6 +953,7 @@ int main()
         column_test(files);
         dense_limits_test(files);
         growth_test(files);
+        compression_test(files);
         error_test(files);
         column_error_test(files);
         reader_boundary_test(files);

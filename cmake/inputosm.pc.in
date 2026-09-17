@@ -8,6 +8,6 @@ Description: Read OSM files.
 URL: https://bitbucket.org/snake77212/@LIBRARY_NAME@
 Version: @PROJECT_VERSION@
 CFlags: -I${includedir}
-Libs: -L${libdir} -linputosm -lz -lexpat
-Requires:
-Requires.private: fmt >= 12.2.0
+Libs: -L${libdir} -linputosm
+Libs.private: -lexpat @CMAKE_THREAD_LIBS_INIT@
+Requires.private: libdeflate >= 1.26, fmt >= 12.2.0

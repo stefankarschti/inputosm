@@ -15,7 +15,7 @@ set_tests_properties(read_osm PROPERTIES LABELS unit)
 set_tests_properties(read_osc PROPERTIES LABELS unit)
 
 add_executable(pbf_block_test pbf_block_test.cpp)
-target_link_libraries(pbf_block_test PRIVATE inputosm::inputosm ZLIB::ZLIB Threads::Threads fmt::fmt)
+target_link_libraries(pbf_block_test PRIVATE inputosm::inputosm libdeflate::libdeflate_static Threads::Threads fmt::fmt)
 add_test(NAME pbf_block COMMAND pbf_block_test)
 set_tests_properties(pbf_block PROPERTIES LABELS unit TIMEOUT 60)
 
