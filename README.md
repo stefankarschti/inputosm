@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-To build and use the supplied `count_all` example on Linux:
+To build and use the supplied `count_entity` example on Linux:
 
 1. Configure the build.
 
@@ -84,14 +84,14 @@ To build and use the supplied `count_all` example on Linux:
    cmake --build build --parallel $(nproc)
    ```
 
-3. Start `count_all` with the path to an OSM file.
+3. Start `count_entity` with the path to a PBF file.
 
    ```bash
-   ./build/test/integration/count_all path/to/planet.osm.pbf 1
+   ./build/test/integration/count_entity path/to/planet.osm.pbf
    ```
 
-The last argument selects metadata decoding.
-The supplied `count_all` example uses multiple threads and a different counter for each thread.
+The supplied `count_entity` example uses multiple threads and a different counter for each thread.
+It requests entity counts through the block API without decoding entity fields.
 
 ## 3. Build and install
 
@@ -453,7 +453,9 @@ The public package does not install this header.
 
 ### 7.1 Count entities
 
-The example in `test/integration/count_all.cpp` uses a different counter for each thread and entity type.
+The example in `test/integration/count_entity.cpp` uses a different counter for each thread and entity type.
+It uses `pbf_reader_t::read_blocks()` and `block.counts()` to count nodes, ways, and relations in one group traversal.
+It does not construct entity arrays or decode metadata.
 The `Counter` type is in `test/integration/counter.h`.
 Displayed counts use fixed comma groups, such as `10,846,489,004`.
 IDs and CSV numbers do not use comma groups.
@@ -462,21 +464,26 @@ The output uses fmt and does not require system locale settings.
 To measure the run time in Bash, use this command:
 
 ```bash
-time ./build/test/integration/count_all path/to/planet.osm.pbf
+time ./build/test/integration/count_entity path/to/planet.osm.pbf
 ```
 
 ```cpp
-std::vector<input_osm::Counter<uint64_t>> counters(3 * input_osm::thread_count());
-auto nodes = std::span{counters.data(), input_osm::thread_count()};
-auto ways  = std::span{counters.data()+input_osm::thread_count(), input_osm::thread_count()};
-auto rels  = std::span{counters.data()+2*input_osm::thread_count(), input_osm::thread_count()};
+input_osm::pbf_reader_t reader;
+reader.set_max_thread_count();
+const auto threads = reader.thread_count();
+std::vector<input_osm::Counter<uint64_t>> counters(3 * threads);
+auto nodes = std::span{counters.data(), threads};
+auto ways  = std::span{counters.data() + threads, threads};
+auto rels  = std::span{counters.data() + 2 * threads, threads};
 
-input_osm::input_file(
-  file, read_meta,
-  [&nodes](auto batch){ nodes[input_osm::thread_index] += batch.size(); return true; },
-  [&ways](auto batch){ ways[input_osm::thread_index] += batch.size(); return true; },
-  [&rels](auto batch){ rels[input_osm::thread_index] += batch.size(); return true; }
-);
+const bool ok = reader.open(file) && reader.read_blocks([&](const input_osm::pbf_block_t& block) {
+    input_osm::pbf_counts_t counts;
+    if (!block.counts(counts)) return false;
+    nodes[input_osm::thread_index] += counts.nodes;
+    ways[input_osm::thread_index] += counts.ways;
+    rels[input_osm::thread_index] += counts.relations;
+    return true;
+});
 ```
 
 ### 7.2 Set a log callback

@@ -68,7 +68,7 @@ The following interface choices do not require new configuration options.
 ## 3. Performance basis
 
 The earlier planet investigation measured the actual counting programs with 32 threads.
-`count_all` took 23.76 seconds.
+The former `count_all` integration program took 23.76 seconds.
 The parallel `count_blocks` took 64.48 seconds.
 Both programs reported the same entity totals.
 
@@ -625,7 +625,8 @@ The proposal does not retain an eager compatibility wrapper.
 The integration program `count_blocks` counts data block callbacks through `read_blocks()`.
 It does not request payload decompression or entity counts.
 The random block integration program will select the fields that it prints or checks.
-`count_all` will continue to use `input_file()` as the compatibility benchmark.
+The integration program `count_entity` uses `counts()` to count nodes, ways, and relations without entity arrays.
+The benchmark driver retains its `entities` mode for compatibility measurements through `input_file()`.
 
 ## 14. Implementation and test plan
 
@@ -678,8 +679,7 @@ Keep those diagnostic runs separate from the required 32-thread comparison.
 | Workload | Reference and purpose |
 | --- | --- |
 | `input_file()` with legacy entity callbacks | Compare against the frozen current implementation. Reject a repeatable sequential regression. |
-| `count_all` | Confirm that compatibility preserves the current counting workload. |
-| Combined entity counts using `counts()` | Compare against eager entity counting and `count_all`. Measure the benefit of avoiding entity arrays. |
+| `count_entity` using `counts()` | Compare against eager and legacy entity counting. Measure the benefit of avoiding entity arrays. |
 | `count_blocks` using framing-only block iteration | Measure descriptor and scheduling cost without payload requests. Do not compare it as equivalent entity work. |
 | Node IDs only | Measure selected decoding with a checksum over every emitted ID. |
 | Coordinates only | Measure independent coordinate selection and compare coordinate checksums. |
@@ -717,7 +717,7 @@ Compatibility requires matching legacy callback behavior on the focused fixtures
 Performance acceptance requires no repeatable `input_file()` regression outside the measured run variation.
 If the new compatibility path regresses, improve that path before implementation is considered complete.
 The count path should outperform eager complete-block decoding on the planet file.
-Whether it surpasses `count_all` must be established by measurement.
+Whether it surpasses legacy entity counting must be established by measurement.
 
 ## 16. Scope limits
 

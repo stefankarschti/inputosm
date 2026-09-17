@@ -3,8 +3,8 @@ project(inputosm_integration_tests)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-add_executable(count_all count_all.cpp)
-target_link_libraries(count_all PRIVATE Threads::Threads inputosm::inputosm fmt::fmt)
+add_executable(count_entity count_entity.cpp)
+target_link_libraries(count_entity PRIVATE Threads::Threads inputosm::inputosm fmt::fmt)
 
 add_executable(statistics statistics.cpp)
 target_link_libraries(statistics PRIVATE Threads::Threads inputosm::inputosm fmt::fmt)
@@ -33,7 +33,7 @@ target_link_libraries(read_block PRIVATE inputosm::inputosm fmt::fmt)
 if(BUILD_TESTING)
     add_test(NAME output_locale
         COMMAND ${CMAKE_COMMAND}
-            -DCOUNT_ALL=$<TARGET_FILE:count_all>
+            -DCOUNT_ENTITY=$<TARGET_FILE:count_entity>
             -DCOUNT_BLOCKS=$<TARGET_FILE:count_blocks>
             -DSTATISTICS=$<TARGET_FILE:statistics>
             -DLAT_STAT=$<TARGET_FILE:lat_stat>

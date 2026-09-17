@@ -18,24 +18,26 @@
 #include <fmt/format.h>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <numeric>
 #include <vector>
 #include <span>
 
 int main(int argc, char** argv)
 {
-    if (argc < 2)
+    if (argc != 2)
     {
-        fmt::print(stderr, "Usage{}<path-to-pbf> [read-metadata]\n", argv[0]);
+        fmt::print(stderr, "Usage: count_entity <file.osm.pbf>\n");
         return EXIT_FAILURE;
     }
     const char* path = argv[1];
     fmt::print("{}\n", path);
-    bool read_metadata = (argc >= 3);
-    if (read_metadata) fmt::print("reading metadata\n");
-    input_osm::set_max_thread_count();
 
-    const size_t actual_thread_count = input_osm::thread_count();
+    input_osm::pbf_reader_t reader;
+    reader.set_max_thread_count();
+    if (!reader.open(path)) return EXIT_FAILURE;
+
+    const size_t actual_thread_count = reader.thread_count();
 
     fmt::print("running on {} threads\n", fmt::group_digits(actual_thread_count));
 
@@ -48,21 +50,14 @@ int main(int argc, char** argv)
     std::span<input_osm::Counter<uint64_t>> relation_count(all_counters.data() + 2 * actual_thread_count,
                                                            actual_thread_count);
 
-    if (!input_osm::input_file(
-            path,
-            read_metadata,
-            [&node_count](std::span<const input_osm::node_t> node_list) -> bool {
-                node_count[input_osm::thread_index] += node_list.size();
-                return true;
-            },
-            [&way_count](std::span<const input_osm::way_t> way_list) -> bool {
-                way_count[input_osm::thread_index] += way_list.size();
-                return true;
-            },
-            [&relation_count](std::span<const input_osm::relation_t> relation_list) -> bool {
-                relation_count[input_osm::thread_index] += relation_list.size();
-                return true;
-            }))
+    if (!reader.read_blocks([&](const input_osm::pbf_block_t& block) {
+            input_osm::pbf_counts_t counts;
+            if (!block.counts(counts)) return false;
+            node_count[input_osm::thread_index] += counts.nodes;
+            way_count[input_osm::thread_index] += counts.ways;
+            relation_count[input_osm::thread_index] += counts.relations;
+            return true;
+        }))
     {
         fmt::print(stderr, "Error while processing pbf\n");
         return EXIT_FAILURE;

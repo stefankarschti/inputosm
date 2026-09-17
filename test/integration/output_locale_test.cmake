@@ -19,7 +19,7 @@ function(check_output program expected)
     set(LAST_OUTPUT "${output}" PARENT_SCOPE)
 endfunction()
 
-check_output("${COUNT_ALL}" "nodes: 17,005\nways: 12\nrelations: 4\n")
+check_output("${COUNT_ENTITY}" "nodes: 17,005\nways: 12\nrelations: 4\n")
 check_output("${COUNT_BLOCKS}" "blocks: 5\n")
 if(NOT LAST_OUTPUT STREQUAL "blocks: 5\n")
     message(FATAL_ERROR "Incorrect block count output:\n${LAST_OUTPUT}")
