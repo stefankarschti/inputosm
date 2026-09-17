@@ -1,144 +1,188 @@
 # PBF benchmarks
 
-Build the benchmark with the release configuration.
+The [performance report](../../docs/pbf-deferred-performance.md) contains the recorded planet comparison.
+
+Build the benchmark in Release mode.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DINPUTOSM_BENCHMARKS=ON
-cmake --build build -j 16
+cmake --build build --target pbf_benchmark -j 16
 ```
 
-The executable writes CSV records to standard output.
-Its arguments are:
+The command syntax is:
 
 ```text
-pbf_benchmark <file> <entities|blocks|random|random-index> <threads> <repetitions> [metadata=0] [requests=256] [max_index=0]
+pbf_benchmark <file> <mode> <threads> <repetitions> [metadata=0] [requests=256] [max_index=0] [selection options]
 ```
 
 | Mode | Operation |
 | --- | --- |
-| `entities` | Read the complete file through `input_file()`. |
-| `blocks` | Open a reader and call `read_blocks()`. |
-| `random` | Use separate readers to scan headers for each requested block. |
-| `random-index` | Build a table for each reader, then use direct block access. |
+| `entities` | Decode legacy entities through `input_file()`. |
+| `blocks` | Iterate opaque blocks and request the selected counts or fields. |
+| `random` | Scan file headers from the start for each random block request. |
+| `random-index` | Build an offset table for each reader, then request random blocks directly. |
 
-Each mode counts all entities and adds their IDs to an unsigned 64-bit checksum.
-The checksum must match between equivalent workloads.
-Unsigned checksum arithmetic uses modulo `2^64`.
+Random modes use separate readers and one shared file mapping.
+They use the same SplitMix64 seed, `0x494e5055544f534d`, and the same request assignment.
+`max_index` must identify the last data block in a file with consecutive data indexes from one.
+The comparison script checks that condition before it starts random workloads.
 
-Use `blocks` to get the last data block index before a random benchmark.
-The random benchmark requires consecutive data indexes from one through `max_index`.
-Check that the reported block count equals `max_index`.
-For files with unknown block types, use a separate list of valid indexes instead of this benchmark's request generator.
+## Select fields and counts
 
-Both random modes use the same SplitMix64 sequence and seed `0x494e5055544f534d`.
-Requests can repeat an index.
-The benchmark assigns request numbers to workers in a fixed cyclic order.
-Each worker has its own reader and decoder.
-The indexed mode builds all reader tables concurrently before the read timer starts.
-Each repetition creates new readers and tables.
+Masks can use decimal or hexadecimal notation.
+Add the required bit values to select a combination.
+For example, node mask `7` selects IDs, latitude, and longitude.
 
-For Berlin, the development commands are:
+| Option | Bit values |
+| --- | --- |
+| `--nodes=MASK` | ID `1`; latitude `2`; longitude `4`; tags `8`; metadata `16`. |
+| `--ways=MASK` | Tags `1`; node references `2`; metadata `4`; node locations `8`. Way IDs are always decoded. |
+| `--relations=MASK` | Tags `1`; member IDs `2`; member types `4`; member roles `8`; metadata `16`. Relation IDs are always decoded. |
+| `--counts=MASK` | Blocks `1`; nodes `2`; ways `4`; relations `8`. |
+| `--strings` | Iterate every string in each block. |
+
+Without selection options, the benchmark decodes all legacy-equivalent fields.
+The positional metadata argument controls metadata for that default selection.
+Default way decoding excludes optional node locations because the legacy interface does not expose them.
+
+Any selection option disables the default entity selections.
+Unspecified entity types remain disabled.
+A zero entity mask enables that entity type with its optional fields disabled.
+`--counts=0` performs framing-only block iteration.
+The benchmark always records visited blocks for diagnostics, including when block counting is not selected.
+
+Count and entity selections can be combined.
+When both request an entity type, the benchmark checks that its count matches the decoded batch totals.
+A combined node, way, and relation count uses `block.counts()`.
+Other count combinations use the individual cached count methods.
+When an application needs several counts, `counts()` avoids repeated group traversal.
+
+Entity mode and eager baseline builds cannot select fields.
+They reject selection options instead of silently ignoring them.
+
+## Select callback work
+
+| Option | Callback work |
+| --- | --- |
+| `--consume=ids` | Add emitted entity IDs to an unsigned 64-bit checksum. This is the default. |
+| `--consume=all` | Also consume selected coordinates, tags, metadata, references, locations, and member columns. |
+| `--consume=count` | Count entities without reading individual output fields. |
+
+Checksums use arithmetic modulo `2^64`.
+The full value checksum uses string IDs, not resolved string contents.
+Legacy and eager baseline modes support ID and count consumption only.
+Compare equivalent callback work when reporting API performance.
+Full metadata output includes more fields and wider numeric types than the legacy output.
+
+Examples for Berlin are:
 
 ```sh
-build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf entities 32 7
-build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf blocks 32 7
-build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf random 32 7 0 1024 1148
-build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf random-index 32 7 0 1024 1148
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf blocks 32 3 --counts=15
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf blocks 32 3 --nodes=7 --consume=all
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf blocks 32 3 --ways=3 --consume=all
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf blocks 32 3 --relations=31 --consume=all
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf blocks 32 3 1
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf entities 32 3 1
+build/test/benchmark/pbf_benchmark /mnt/maps/berlin-260514.osm.pbf random-index 32 3 0 1024 1148 --nodes=7
 ```
 
-The `INPUTOSM_BENCH_GENERIC_HEADERS` CMake option supplies the random scan baseline.
-It disables the common BlobHeader fast path and uses the general Protocol Buffers parser for every header.
-The `INPUTOSM_BENCH_INDEPENDENT_MAPS` option disables sharing between readers of the same file.
-Enable both benchmark options to reproduce the initial random access baseline.
-Both builds retain the same decoder, validation rules, and benchmark workload.
-The default build uses the fast path and falls back to the general parser for other field layouts.
-It also shares immutable file mappings between readers.
+## Measure time and memory
 
-The `INPUTOSM_BENCH_BASELINE` preprocessor definition builds the benchmark against the previous free block API.
-Use the original library and headers for that executable.
-This option supports sequential regression measurements against revision `e2458c0`.
-It does not add a compatibility API to the new library.
+The executable writes one CSV row per repetition.
 
-## Measurements
-
-| CSV field | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `setup_seconds` | Time before the read phase. Random modes include reader and thread creation. |
-| `index_build_seconds` | Elapsed time for concurrent table construction, including worker startup. Zero for other modes. |
-| `read_seconds` | Time for the read phase. Random reads exclude table construction and reader destruction. |
-| `teardown_seconds` | Time after the read phase and before reader destruction completes. |
-| `total_seconds` | Setup, read, and teardown time. Use this field for sequential regression comparisons. |
-| `cpu_seconds` | Process user and system CPU time, including memory measurement. |
-| `max_rss_kib` | Process maximum resident set size. This is a cumulative high-water value within one process. |
-| `index_bytes` | Total allocated offset-vector capacity across all readers. This excludes allocator bookkeeping. |
-| `live_rss_kib` | Resident mappings at the measurement point. Shared file pages can appear once for each mapping. |
-| `live_pss_kib` | Proportional resident memory from Linux `smaps_rollup`. It apportions shared pages across mappings. |
-| `live_anon_kib` | Anonymous proportional resident memory. This includes decoder storage, tables, thread stacks, and retained allocator pages. |
-| `page_table_kib` | Kernel page-table storage reported by `VmPTE`. This storage is additional to proportional resident memory. |
-| `minor_faults`, `major_faults` | Process page faults during the operation and memory measurement. |
+| `setup_seconds` | Reader setup and worker startup before the timed read phase. |
+| `index_build_seconds` | Concurrent offset table construction, including worker startup. |
+| `read_seconds` | The read phase, excluding explicit reader destruction and memory sampling. |
+| `teardown_seconds` | Time after the read phase, including remaining reader destruction. |
+| `total_seconds` | Setup, read, and teardown time, excluding explicit memory sampling. |
+| `cpu_seconds` | Process user and system CPU time, including memory sampling. |
+| `max_rss_kib` | Process peak resident memory. This value accumulates across repetitions in the same process. |
+| `live_pss_kib` | Proportional resident memory at the post-read sample. |
+| `live_anon_kib` | Anonymous proportional resident memory at that sample. |
+| `page_table_kib` | Kernel page-table memory at that sample. |
+| `index_bytes` | Total offset-vector capacity across readers. |
+| `node_fields`, `way_fields`, `relation_fields` | Effective field masks. A value of `-1` disables the entity type. |
+| `count_fields` | Requested count mask. |
+| `checksum`, `values_checksum` | Entity ID checksum and selected value checksum. |
 
-The benchmark samples memory after reading, while explicit reader objects remain open.
-The `entities` API releases its temporary reader before that sample.
-Worker allocations can remain in the allocator after worker threads finish.
-The wall timers exclude the time necessary to read `smaps_rollup`.
-The original free block API includes mapping destruction within its read call.
-Thus, compare `total_seconds` for old and new sequential APIs.
+Worker threads can release their TLS buffers before the post-read sample.
+Thus, the anonymous post-read value does not describe peak decoder storage.
+The comparison script also samples `VmRSS`, `RssAnon`, and `VmPTE` every 50 milliseconds while each process runs.
+The executable supplies its procfs process ID, so sampling also works across PID namespaces.
+These sampled peaks can miss short allocation peaks.
+The process peak RSS field does not have that sampling limitation.
+Neither measure isolates allocator overhead from decoder allocations.
 
-Run reference and candidate processes separately on an otherwise idle machine.
-Record the first pass separately from subsequent warm-cache passes.
-Do not claim a cold-cache result unless the cache state supports that claim.
-Use repeated measurements and report their spread.
-Report index setup and total time with random read time, because table construction affects short workloads.
+Random samples keep the readers and their indexes open.
+The legacy `input_file()` call releases its reader before post-read sampling.
+Compare total time for sequential regression decisions.
+Report both index construction and total time for random access.
 
-## Repeated comparison
+## Build the baselines
 
-Use the comparison script to alternate the reference and candidate runs.
-The script checks entity counts and ID checksums after each run.
-It records executable hashes, commands, raw CSV files, and summary statistics.
-Each timed run uses a separate process.
-The initial reference block pass warms the file and supplies the maximum block index.
+Use the exact `main` revision as the primary baseline.
+Use the previous reader branch revision as an additional regression reference.
+The older `main` uses Zlib. The reader reference and candidate use libdeflate.
+Keep compiler flags and dependency versions equal where those revisions permit it.
+Record this decompressor difference with the results.
+
+Extract each revision into a separate build source directory.
+Build its static library and dependencies in Release mode.
+Use local dependency sources when network access is unavailable.
+Compile this benchmark against the matching baseline headers and libraries.
+
+For the `main` API, define `INPUTOSM_BENCH_BASELINE`:
 
 ```sh
-python3 test/benchmark/run_comparison.py \
+clang++-19 -std=c++20 -O3 -DNDEBUG -DINPUTOSM_BENCH_BASELINE \
+  -Ibuild/deferred-baselines/main-src/include test/benchmark/pbf_benchmark.cpp \
+  build/deferred-baselines/main-build/libinputosm.a \
+  build/deferred-baselines/main-build/_deps/fmt-build/libfmt.a \
+  -lz -lexpat -pthread -o build/deferred-baselines/main-benchmark
+```
+
+For the previous reader API, define `INPUTOSM_BENCH_READER_BASELINE`:
+
+```sh
+clang++-19 -std=c++20 -O3 -DNDEBUG -DINPUTOSM_BENCH_READER_BASELINE \
+  -Ibuild/deferred-baselines/reader-src/include test/benchmark/pbf_benchmark.cpp \
+  build/deferred-baselines/reader-build/libinputosm.a \
+  build/deferred-baselines/reader-build/_deps/fmt-build/libfmt.a \
+  build/deferred-baselines/reader-build/_deps/libdeflate-build/libdeflate.a \
+  -lexpat -pthread -o build/deferred-baselines/reader-benchmark
+```
+
+The `main` baseline has no random block reader.
+Its random access comparison is unavailable.
+Use the previous reader revision for scan and index comparisons.
+
+## Run the workload matrix
+
+Use a new output directory for each comparison.
+The script copies the binaries before measurement.
+It records their hashes, source hashes, revision IDs, input size, commands, and raw results.
+It checks counts and ID checksums for equivalent workloads.
+
+```sh
+python3 test/benchmark/run_deferred.py \
   --input /mnt/maps/planet-260907.osm.pbf \
-  --reference build/benchmarks/baseline/pbf_benchmark \
+  --main build/deferred-baselines/main-benchmark \
+  --reader build/deferred-baselines/reader-benchmark \
   --candidate build/test/benchmark/pbf_benchmark \
-  --generic build/generic/test/benchmark/pbf_benchmark \
-  --output build/benchmarks/planet-final-v2 \
+  --output build/benchmarks/deferred-planet \
   --threads 32 --rounds 3 --requests 4096
 ```
 
-For the random baseline, configure a separate release build.
+The matrix contains every nonempty count combination and the requested selective entity workloads.
+It includes all-entity decoding with and without metadata, legacy parity, and random scans with and without indexes.
+A separately recorded warmup precedes the measured rounds.
+The script reverses case order in alternating rounds.
+Each measurement runs in a fresh process.
+Use `--only TEXT` to select matching case names for a focused comparison.
 
-```sh
-cmake -S . -B build/generic \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
-  -DINPUTOSM_BENCHMARKS=ON \
-  -DINPUTOSM_BENCH_GENERIC_HEADERS=ON \
-  -DINPUTOSM_BENCH_INDEPENDENT_MAPS=ON
-cmake --build build/generic -j 16
-```
-
-For the sequential reference, extract revision `e2458c0` into a separate directory.
-Build its library with the same compiler, dependencies, and release flags.
-Compile the current benchmark source with `INPUTOSM_BENCH_BASELINE` and the reference headers.
-Link that executable with the reference library.
-
-```sh
-mkdir -p build/reference-src
-git archive e2458c0 | tar -x -C build/reference-src
-cmake -S build/reference-src -B build/reference \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
-  -DBUILD_TESTING=OFF -DINPUTOSM_INTEGRATION_TESTS=OFF
-cmake --build build/reference -j 16
-clang++-19 -std=c++20 -O3 -DNDEBUG -DINPUTOSM_BENCH_BASELINE \
-  -Ibuild/reference-src/include test/benchmark/pbf_benchmark.cpp \
-  build/reference/libinputosm.a \
-  build/reference/_deps/fmt-build/libfmt.a \
-  build/reference/_deps/libdeflate-build/libdeflate.a \
-  -lexpat -pthread -o build/reference/pbf_benchmark
-```
-
-The [performance report](../../docs/pbf-reader-performance.md) gives the measured results and memory limits.
+Run the matrix on an otherwise idle machine.
+Do not run builds or other large scans during measurement.
+Report medians and measurement ranges.
+Do not describe warm-cache measurements as cold-cache results.

@@ -1,5 +1,6 @@
 #include <inputosm/inputosm.h>
 #include "pbf_test_data.h"
+#include "pbf_eager_test_view.h"
 
 #include <algorithm>
 #include <array>
@@ -30,9 +31,9 @@ void check(bool condition, const char* expression, int line)
 }
 #define CHECK(expression) check(bool(expression), #expression, __LINE__)
 
-bool read_test_blocks(const char* filename, bool metadata, const pbf_block_handler_t& handler)
+bool read_test_blocks(const char* filename, bool metadata, const eager_handler_t& handler)
 {
-    pbf_reader_t reader;
+    eager_reader_t reader;
     reader.set_thread_count(input_osm::thread_count());
     return reader.open(filename) && reader.read_blocks(metadata, handler);
 }
@@ -42,10 +43,6 @@ static_assert(std::is_same_v<decltype(relation_member_t::role), std::string_view
 static_assert(std::is_same_v<decltype(node_t::tags), std::span<const tag_t>>);
 static_assert(std::is_same_v<decltype(way_t::node_refs), std::span<const int64_t>>);
 static_assert(std::is_same_v<decltype(relation_t::members), std::span<const relation_member_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::nodes), std::span<const node_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::ways), std::span<const way_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::relations), std::span<const relation_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::string_table), std::span<const std::string_view>>);
 
 const tag_t* find_tag(std::span<const tag_t> tags, std::string_view key)
 {
@@ -185,7 +182,7 @@ void fixture_test(std::string_view name, size_t count, bool metadata, size_t thr
     const auto caller = std::this_thread::get_id();
     const auto previous_type = file_type;
     const auto previous_mode = osc_mode;
-    CHECK(read_test_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) {
+    CHECK(read_test_blocks(path.c_str(), metadata, [&](const eager_block_t& block) {
         std::lock_guard lock(mutex);
         CHECK(thread_index < thread_count() && block_index == block.index);
         CHECK(file_type == previous_type && osc_mode == previous_mode);
@@ -234,7 +231,7 @@ void fixture_test(std::string_view name, size_t count, bool metadata, size_t thr
     CHECK(input_file(path.c_str(), metadata, {}, {}, {}));
 }
 
-bool keep_block(const pbf_block_t&)
+bool keep_block(const eager_block_t&)
 {
     return true;
 }
@@ -262,7 +259,7 @@ void layout_test(files_t& files)
         const auto file = initial + skip + data + raw_block("OSMData", table());
         const auto path = files.write(file, ".binary");
         size_t calls = 0;
-        CHECK(read_test_blocks(path.c_str(), true, [&](const pbf_block_t& block) {
+        CHECK(read_test_blocks(path.c_str(), true, [&](const eager_block_t& block) {
             if (++calls == 1)
             {
                 CHECK(block.index == 2 && block.file_offset == initial.size() + skip.size());
@@ -332,7 +329,7 @@ void layout_test(files_t& files)
                                          zlib_block(table({"", "metadata user", "unused"}) +
                                                     message(2, message(2, dense_first) + message(2, dense_second))));
     for (bool metadata : {false, true})
-        CHECK(read_test_blocks(split_dense.c_str(), metadata, [&](const pbf_block_t& block) {
+        CHECK(read_test_blocks(split_dense.c_str(), metadata, [&](const eager_block_t& block) {
             CHECK(block.string_table.size() == 3 && block.string_table[1] == "metadata user" &&
                   block.string_table[2] == "unused");
             CHECK(block.nodes.size() == 2 && block.nodes[0].id == 10 && block.nodes[1].id == 9);
@@ -464,7 +461,7 @@ void column_test(files_t& files)
                     }
                     return true;
                 };
-                CHECK(read_test_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) {
+                CHECK(read_test_blocks(path.c_str(), metadata, [&](const eager_block_t& block) {
                     return nodes(block.nodes) && ways(block.ways) && relations(block.relations);
                 }));
                 CHECK(nodes_seen == 5 && ways_seen == 1 && relations_seen == 1);
@@ -509,7 +506,7 @@ void dense_limits_test(files_t& files)
             }
             return true;
         };
-        CHECK(read_test_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) { return nodes(block.nodes); }));
+        CHECK(read_test_blocks(path.c_str(), metadata, [&](const eager_block_t& block) { return nodes(block.nodes); }));
         CHECK(count == 4);
         count = 0;
         CHECK(input_file(path.c_str(), metadata, nodes, {}, {}));
@@ -540,7 +537,7 @@ void growth_test(files_t& files)
             2, message(4, integer(1, group) + message(8, roles) + message(9, refs) + message(10, types) + tags));
     }
     const auto path = files.write(header() + zlib_block(payload));
-    CHECK(read_test_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+    CHECK(read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
         CHECK(block.nodes.size() == 3600 && block.ways.size() == 12 && block.relations.size() == 12);
         for (size_t group = 0; group < 12; ++group)
         {
@@ -607,7 +604,7 @@ void compression_test(files_t& files)
         {
             set_thread_count(threads);
             std::atomic<size_t> calls{0};
-            CHECK(read_test_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+            CHECK(read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
                 CHECK(block.nodes.size() == 1);
                 const auto index = static_cast<size_t>(block.nodes[0].id - 1);
                 CHECK(index < sizes.size());
@@ -640,7 +637,7 @@ void compression_test(files_t& files)
         {
             set_thread_count(threads);
             std::atomic<size_t> calls{0};
-            CHECK(!read_test_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+            CHECK(!read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
                 CHECK(block.nodes.size() == 1 && block.nodes[0].id == 1);
                 ++calls;
                 return true;
@@ -832,7 +829,7 @@ void column_error_test(files_t& files)
         const int64_t id = bits == 63 ? minimum : int64_t{1} << bits;
         const auto path = files.write(header() + raw_block("OSMData", primitive(message(1, node(id)))));
         size_t calls = 0;
-        CHECK(read_test_blocks(path.c_str(), true, [&](const pbf_block_t& block) {
+        CHECK(read_test_blocks(path.c_str(), true, [&](const eager_block_t& block) {
             CHECK(block.nodes.size() == 1 && block.nodes[0].id == id);
             ++calls;
             return true;
@@ -921,7 +918,7 @@ void cancellation_test(files_t& files)
         std::condition_variable changed;
         size_t entered = 0, exited = 0;
         const auto caller = std::this_thread::get_id();
-        CHECK(!read_test_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+        CHECK(!read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
             std::unique_lock lock(mutex);
             CHECK(std::this_thread::get_id() != caller);
             CHECK(block.nodes[0].id == 1);

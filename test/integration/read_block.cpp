@@ -19,13 +19,15 @@ int main(int argc, char** argv)
         input_osm::pbf_reader_t reader;
         if (!reader.open(argv[1])) return EXIT_FAILURE;
         if (argc == 4 && !reader.build_index()) return EXIT_FAILURE;
-        const bool ok = reader.read_block(index, false, [](const input_osm::pbf_block_t& block) {
+        const bool ok = reader.read_block(index, [](const input_osm::pbf_block_t& block) {
+            input_osm::pbf_counts_t counts;
+            if (!block.counts(counts)) return false;
             fmt::print("block={} offset={} nodes={} ways={} relations={}\n",
-                       block.index,
-                       block.file_offset,
-                       block.nodes.size(),
-                       block.ways.size(),
-                       block.relations.size());
+                       block.index(),
+                       block.file_offset(),
+                       counts.nodes,
+                       counts.ways,
+                       counts.relations);
             return true;
         });
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;

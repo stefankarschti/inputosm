@@ -242,102 +242,147 @@ Refer to section 11 for the limits on cancellation.
 The `decode_metadata` option controls PBF metadata decoding.
 This option does not change how the XML reader reads metadata attributes.
 
-### Read complete PBF blocks
+### Read PBF blocks on demand
 
 Use `pbf_reader_t::read_blocks()` for one callback per `OSMData` block.
-The callback receives all nodes, ways, relations, and string table entries from that block.
-The Boolean result is `true` on completion and `false` on cancellation or error.
-The reader opens PBF content without a filename extension check.
+The callback receives an opaque block reference.
+The reader decompresses its payload only when a block method needs that payload.
+Count methods do not construct entity arrays.
 
 ```cpp
 input_osm::pbf_reader_t reader;
 reader.set_max_thread_count();
 const bool ok = reader.open("map.osm.pbf") && reader.read_blocks(
-    false,
     [](const input_osm::pbf_block_t& block) {
-        for (const auto& way : block.ways)
-            for (const auto& tag : way.tags)
-                if (tag.key == "route" && tag.value == "ferry")
-                    fmt::print("{}\n", way.id);
+        input_osm::pbf_counts_t counts;
+        if (!block.counts(counts)) return false;
+        fmt::print("Block {}: {} nodes, {} ways, {} relations\n",
+                   block.index(), counts.nodes, counts.ways, counts.relations);
         return true;
     });
 ```
 
-The `count_blocks` integration example counts blocks and entities.
-`block.index` is the file block ordinal, including the initial header at index zero.
-`block.file_offset` identifies the four-byte length field in the input file.
-The block also exposes `granularity`, `lat_offset`, `lon_offset`, and `date_granularity`.
+`node_count()`, `way_count()`, and `relation_count()` request individual counts.
+The first query inspects the payload. Later queries reuse completed counts.
+Dense node counts scan encoded IDs without calculating absolute IDs.
+A count query does not validate unrequested entity fields.
 
-All PBF input methods use string views directly into raw or decompressed block bytes.
-A complete block callback also receives `std::span<const std::string_view> string_table`.
-This span preserves table indexes, duplicates, empty strings, and unused entries.
-A missing or invalid table causes an error before the block callback.
+`block.index()` includes the initial header at index zero.
+`block.file_offset()` identifies the four-byte length field.
+`parameters()` supplies the coordinate and timestamp conversion parameters.
 The reader supports raw and Zlib Blobs, ordinary nodes, and dense nodes.
+It checks required header features during `open()`.
 It rejects unsupported required features, including historical visibility.
 
-With one thread, callbacks run in file order in the calling thread.
+With one thread, block callbacks run in file order in the calling thread.
 With multiple threads, callbacks can overlap and finish in a different order.
-The reader keeps its file mapping until `close()` or destruction.
-Each sequential call starts at the file start.
-Keep the file contents unchanged while the reader is open.
-Refer to the [reader design](docs/pbf-random-access-proposal.md) for the complete contract.
-The [performance report](docs/pbf-reader-performance.md) compares sequential reads, random scans, and offset tables.
+Every decode method runs synchronously in the thread that calls it.
+Keep the borrowed block reference in its callback thread.
+Use a separate reader for a nested read or a simultaneous operation.
+Readers of the same unchanged file share one immutable mapping.
+Keep the file contents unchanged while any reader remains open.
+
+### Select entity fields
+
+Node options select IDs, latitude, longitude, tags, and metadata independently.
+Way options select tags, references, metadata, and optional node locations.
+Relation options select tags, member IDs, member types, member roles, and metadata independently.
+Ways and relations always supply their IDs during entity decoding.
+
+```cpp
+const bool ok = reader.read_blocks([](const input_osm::pbf_block_t& block) {
+    return block.decode_nodes(
+        {.id = true, .latitude = true, .longitude = true},
+        [](const input_osm::pbf_node_batch_t& batch) {
+            for (size_t i = 0; i < batch.count; ++i)
+                fmt::print("{} {} {}\n", batch.ids[i], batch.raw_latitudes[i], batch.raw_longitudes[i]);
+            return true;
+        });
+});
+```
+
+Each callback receives spans for one primitive group.
+Selected scalar columns have `batch.count` elements.
+Unselected columns are empty.
+Variable lists use flat values and offsets. For example, `batch.tags[i]` selects one entity's tags.
+`decode_entities()` combines selections for all three entity types in one group traversal.
+
+Tags, user names, and member roles use string IDs.
+The reader does not check those IDs against the string table size.
+The application must check bounds before string lookup.
+`string_table_size()` returns the number of strings, including entry zero.
+`decode_strings()` calls `bool(std::string_view)` for every string in table order.
+Callback positions give implicit string IDs, starting at zero.
+
+Entity spans remain valid only during their entity callback.
+String byte views remain valid until the enclosing block callback returns.
+Internal TLS buffers retain capacity for reuse.
+A nested read through another reader uses separate buffers.
+Block methods cannot be called recursively from an entity or string callback, except `index()` and `file_offset()`.
+
+The new metadata type preserves 64-bit timestamps and changesets, user fields, visibility, and field presence.
+Coordinates remain raw integers after delta decoding.
+Convert latitude to nanodegrees with `lat_offset + granularity * raw_latitude`.
+Use the equivalent longitude parameters for longitude.
+Convert timestamps to Unix milliseconds with `date_granularity * raw_timestamp`.
+Use arithmetic that can represent the result.
+
+### Read header metadata
+
+Call `reader.decode_header(handler)` while the reader is idle.
+The handler receives `const pbf_header_metadata_t&` in the calling thread.
+It exposes the bounding box, feature lists, writing program, source, and all three replication fields.
+Optional values distinguish absence from empty strings and numeric zero.
+Header views remain valid only during that callback.
+Header bounding box coordinates use nanodegrees independently of data block parameters.
 
 ### Read a block by index
 
 Use `read_block()` with a file block index from an earlier block callback.
 The method calls the handler once in the calling thread.
-Header blocks, unknown block types, and unavailable indexes cause `false` without a callback.
+Header blocks, unknown block types, and unavailable indexes return `false` without a callback.
 
 ```cpp
 input_osm::pbf_reader_t reader;
 if (!reader.open("map.osm.pbf")) return 1;
 if (!reader.build_index()) return 1;
-const bool ok = reader.read_block(100, false, [](const input_osm::pbf_block_t& block) {
-    fmt::print("Block {} has {} nodes\n", block.index, block.nodes.size());
+const bool ok = reader.read_block(100, [](const input_osm::pbf_block_t& block) {
+    size_t count;
+    if (!block.node_count(count)) return false;
+    fmt::print("Block {} has {} nodes\n", block.index(), count);
     return true;
 });
 ```
 
 `build_index()` is optional.
-Without it, each indexed read scans earlier block headers and skips their payloads.
-With it, the reader uses an in-memory offset table to find the requested block directly.
-The table uses eight bytes per file block, plus vector capacity overhead.
-`index_memory_bytes()` reports the allocated vector storage in bytes.
-`has_index()` reports whether the table is available.
+Without it, each request scans earlier file block headers and skips their payloads.
+With it, the reader uses an in-memory offset table.
+`index_memory_bytes()` reports allocated index capacity.
+Each reader keeps its own offset table.
+Index construction validates framing without decoding data payloads.
 
-Index construction checks framing through the file end without decoding data payloads.
-An invalid later frame can make index construction fail even when an earlier block supports a scan-based read.
-A failed index construction leaves the reader open without a partial table.
-An existing index remains available after a payload decoding error.
-Sequential reads always use a bounded queue and do not require an index.
+### Migrate to version 0.4.0
 
-Use separate reader objects for simultaneous indexed requests.
-Each reader keeps its own offset table and decoder storage.
-The [benchmark guide](test/benchmark/README.md) describes the scan and index comparison.
+The opaque block replaces the eager block structure.
+Rebuild direct block consumers with the new headers and library.
 
-### Migrate to version 0.3.0
+1. Remove the metadata argument from `read_blocks()` and `read_block()`.
+2. Replace entity span sizes with count methods.
+3. Replace entity span access with the selected decode method.
+4. Select metadata in the entity options when necessary.
+5. Use `decode_strings()` when string lookup is necessary.
+6. Check string ID bounds in the application before lookup.
 
-This version replaces the free `input_pbf_blocks()` function with `pbf_reader_t::read_blocks()`.
-Rebuild dependent applications with the new headers and library.
+The `input_file()` signature, entity types, callback order, and XML behavior remain unchanged.
+Its PBF adapter uses public block iteration and the shared group decoder.
+It writes legacy records directly and retains the existing string lookup and metadata checks.
+The adapter preserves empty callback batches and validates entities when handlers are absent.
+A callback failure stops subsequent callbacks for that group.
+Callbacks that already started on other workers can finish during cancellation.
 
-1. Construct a reader.
-2. Configure its member thread setting.
-3. Open the input file.
-4. Call `read_blocks()` with the metadata setting and block handler.
-
-Each reader starts with one thread.
-Global thread settings apply to `input_file()` and do not configure independent reader objects.
-Reader callbacks use their block argument and thread-local context instead of the global `file_type` and `osc_mode` variables.
-
-PBF `input_file()` uses a temporary reader and preserves primitive-group entity batches.
-The reader uses one decoder implementation for entity and block callbacks.
-Public block callbacks receive complete blocks.
-A handler failure stops subsequent entity calls for that group.
-Other callbacks that already started can finish during cancellation.
-Complete block callbacks require more decoder memory than primitive-group entity callbacks.
-Readers of the same unchanged file share its mapping and keep separate decoders and indexes.
-XML and OSC callback rules remain unchanged.
+The [deferred reader design](docs/pbf-deferred-decoding-proposal.md) defines the complete contract.
+The [benchmark guide](test/benchmark/README.md) describes field masks, count combinations, and baseline comparisons.
+The [performance report](docs/pbf-deferred-performance.md) gives planet results and memory measurements with 32 threads.
 
 ### Migrate to version 0.2.0
 
@@ -650,6 +695,12 @@ The `set_verbose()` function sets a flag that the reader does not use.
 
 ## 9. Performance and benchmarks
 
+The [deferred decoding report](docs/pbf-deferred-performance.md) compares version 0.4.0 with `main` on the 2026 planet file.
+It includes count combinations, selected entity fields, metadata, random access, and memory measurements with 32 threads.
+The [benchmark guide](test/benchmark/README.md) explains how to measure other field combinations.
+
+### Historical measurement
+
 The recorded benchmark used the planet file dated 2022-09-05.
 The system had two Xeon E5-2699 processors and 72 threads in total.
 
@@ -684,15 +735,18 @@ File input, decompression, and callbacks can limit throughput.
 
 ### PBF reader
 
-1. The reader maps the file into memory.
-2. The reader checks the header before it adds data blocks to a bounded work queue.
-3. Worker threads get blocks from the queue and decompress the data when necessary.
-4. Each worker decodes entities into vectors for that thread.
-5. Each worker calls one handler for the complete decoded block.
-6. For `input_file()`, the reader delivers primitive-group spans through an entity adapter.
+1. Readers of the same unchanged file share one file mapping.
+2. The reader checks the header before it adds data block descriptors to a bounded work queue.
+3. Each worker calls the block handler with an opaque block reference.
+4. The first data request decompresses the block payload when necessary.
+5. Count methods examine message structures without constructing entity arrays.
+6. Decode methods write selected columns into reusable thread-local storage for one primitive group.
+7. Entity callbacks run synchronously in the thread that requests decoding.
+8. For `input_file()`, the compatibility adapter writes legacy records through the same block iteration API.
 
 An indexed read uses the offset table or scans headers from the file start.
-It decodes only the requested data block in the calling thread.
+It supplies the requested data block in the calling thread.
+Its payload remains undecoded until the callback requests data.
 
 ### XML reader
 

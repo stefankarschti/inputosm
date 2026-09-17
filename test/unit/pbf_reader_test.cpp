@@ -1,5 +1,6 @@
 #include <inputosm/inputosm.h>
 #include "pbf_test_data.h"
+#include "pbf_eager_test_view.h"
 
 #include <algorithm>
 #include <atomic>
@@ -24,16 +25,16 @@ void check(bool result, const char* expression, int line)
 }
 #define CHECK(expression) check(bool(expression), #expression, __LINE__)
 
-static_assert(!std::is_copy_constructible_v<pbf_reader_t>);
-static_assert(std::is_nothrow_move_constructible_v<pbf_reader_t>);
-static_assert(std::is_nothrow_move_assignable_v<pbf_reader_t>);
+static_assert(!std::is_copy_constructible_v<input_osm::pbf_reader_t>);
+static_assert(std::is_nothrow_move_constructible_v<input_osm::pbf_reader_t>);
+static_assert(std::is_nothrow_move_assignable_v<input_osm::pbf_reader_t>);
 
-bool keep(const pbf_block_t&)
+bool keep(const eager_block_t&)
 {
     return true;
 }
 
-std::string snapshot(const pbf_block_t& block)
+std::string snapshot(const eager_block_t& block)
 {
     std::string result;
     auto number = [&](auto value) {
@@ -95,7 +96,7 @@ std::string snapshot(const pbf_block_t& block)
 void lifetime_test(files_t& files)
 {
     const auto path = files.write(header() + raw_block("OSMData", primitive(message(1, node(17)))));
-    pbf_reader_t reader;
+    eager_reader_t reader;
     CHECK(!reader.is_open() && !reader.has_index() && reader.index_memory_bytes() == 0);
     CHECK(reader.thread_count() == 1);
     CHECK(!reader.read_block(1, false, keep) && !reader.read_blocks(false, keep));
@@ -117,7 +118,7 @@ void lifetime_test(files_t& files)
     const auto index_bytes = reader.index_memory_bytes();
     CHECK(index_bytes >= 2 * sizeof(uint64_t));
     CHECK(reader.build_index() && reader.index_memory_bytes() == index_bytes);
-    pbf_reader_t moved(std::move(reader));
+    eager_reader_t moved(std::move(reader));
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move): The move contract leaves a closed reader.
     CHECK(!reader.is_open() && reader.thread_count() == 1 && !reader.has_index());
     CHECK(moved.is_open() && moved.has_index() && moved.thread_count() == maximum);
@@ -156,7 +157,7 @@ void access_test(files_t& files)
     const auto path = files.write(bytes, ".binary");
     for (bool indexed : {false, true})
     {
-        pbf_reader_t reader;
+        eager_reader_t reader;
         reader.set_thread_count(4);
         CHECK(reader.open(path.c_str()));
         if (indexed) CHECK(reader.build_index());
@@ -201,7 +202,7 @@ void failure_test(files_t& files)
     const auto path = files.write(header() + raw_block("OSMData", "invalid") + good);
     for (bool indexed : {false, true})
     {
-        pbf_reader_t reader;
+        eager_reader_t reader;
         CHECK(reader.open(path.c_str()));
         if (indexed) CHECK(reader.build_index());
         CHECK(reader.read_block(2, false, keep));
@@ -224,7 +225,7 @@ void failure_test(files_t& files)
     }
     for (const auto& invalid : {std::string("bad"), header(), prefix(65536), prefix(0)})
     {
-        pbf_reader_t reader;
+        eager_reader_t reader;
         CHECK(reader.open(files.write(header() + good + invalid).c_str()));
         CHECK(reader.read_block(1, false, keep));
         CHECK(!reader.read_block(2, false, keep));
@@ -232,7 +233,7 @@ void failure_test(files_t& files)
         CHECK(reader.read_block(1, false, keep));
         CHECK(!reader.read_blocks(false, keep));
     }
-    pbf_reader_t reader;
+    eager_reader_t reader;
     CHECK(!reader.open(files.write(header("Unsupported")).c_str()));
     const auto first = header();
     for (size_t size = 0; size < first.size(); ++size) CHECK(!reader.open(files.write(first.substr(0, size)).c_str()));
@@ -313,9 +314,9 @@ void descriptor_test(files_t& files)
     for (const auto& descriptor : headers)
     {
         const auto path = files.write(header() + prefix(descriptor.size()) + descriptor + blob);
-        pbf_reader_t reader;
+        eager_reader_t reader;
         CHECK(reader.open(path.c_str()));
-        const auto handler = [](const pbf_block_t& block) {
+        const auto handler = [](const eager_block_t& block) {
             CHECK(block.index == 1 && block.nodes.size() == 1 && block.nodes[0].id == 42);
             return true;
         };
@@ -325,7 +326,7 @@ void descriptor_test(files_t& files)
         CHECK(reader.read_block(1, false, handler));
     }
     const auto unknown = type + size + message(1, "Unknown");
-    pbf_reader_t skipped;
+    eager_reader_t skipped;
     CHECK(skipped.open(files.write(header() + prefix(unknown.size()) + unknown + blob).c_str()));
     size_t calls = 0;
     CHECK(skipped.read_blocks(false, [&](const auto&) {
@@ -343,7 +344,7 @@ void descriptor_test(files_t& files)
                                            type + size + std::string("\0", 1)};
     for (const auto& descriptor : invalid)
     {
-        pbf_reader_t reader;
+        eager_reader_t reader;
         CHECK(reader.open(files.write(header() + prefix(descriptor.size()) + descriptor + blob).c_str()));
         CHECK(!reader.read_block(1, false, keep));
         CHECK(!reader.read_blocks(false, keep));
@@ -366,13 +367,13 @@ void concurrent_test(files_t& files)
             auto operation = [&](size_t worker, bool all) {
                 try
                 {
-                    pbf_reader_t reader;
+                    eager_reader_t reader;
                     reader.set_thread_count(worker + 1);
                     CHECK(reader.open(path.c_str()));
                     if (worker == 1) CHECK(reader.build_index());
                     block_index = 111;
                     thread_index = 222;
-                    const auto handler = [&](const pbf_block_t& block) {
+                    const auto handler = [&](const eager_block_t& block) {
                         const auto before = snapshot(block);
                         CHECK(block.nodes[0].version == (worker == 0 ? 9 : 0));
                         std::unique_lock lock(mutex);
@@ -426,9 +427,9 @@ void large_offset_test(files_t& files)
     file.write(data.data(), data.size());
     file.close();
     CHECK(!file.fail() && offset > (uint64_t{1} << 32));
-    pbf_reader_t reader;
+    eager_reader_t reader;
     CHECK(reader.open(path.c_str()));
-    const auto handler = [&](const pbf_block_t& block) {
+    const auto handler = [&](const eager_block_t& block) {
         CHECK(block.index == 3 && block.file_offset == offset && block.nodes[0].id == 42);
         return true;
     };
@@ -440,10 +441,10 @@ void large_offset_test(files_t& files)
 void shared_file_test(files_t& files)
 {
     const auto path = files.write(header() + raw_block("OSMData", primitive(message(1, node(77)))));
-    pbf_reader_t first, second;
+    eager_reader_t first, second;
     CHECK(first.open(path.c_str()) && second.open(path.c_str()));
-    CHECK(first.read_block(1, false, [&](const pbf_block_t& outer) {
-        return second.read_block(1, false, [&](const pbf_block_t& inner) {
+    CHECK(first.read_block(1, false, [&](const eager_block_t& outer) {
+        return second.read_block(1, false, [&](const eager_block_t& inner) {
 #ifndef INPUTOSM_BENCH_INDEPENDENT_MAPS
             CHECK(outer.string_table[0].data() == inner.string_table[0].data());
 #endif
@@ -452,7 +453,7 @@ void shared_file_test(files_t& files)
         });
     }));
     first.close();
-    const auto original = [](const pbf_block_t& block) {
+    const auto original = [](const eager_block_t& block) {
         CHECK(block.nodes.size() == 1 && block.nodes[0].id == 77);
         return true;
     };
@@ -460,7 +461,7 @@ void shared_file_test(files_t& files)
     const auto replacement = files.write(header() + raw_block("OSMData", primitive(message(1, node(99)))));
     std::filesystem::rename(replacement, path);
     CHECK(first.open(path.c_str()));
-    CHECK(first.read_block(1, false, [](const pbf_block_t& block) {
+    CHECK(first.read_block(1, false, [](const eager_block_t& block) {
         CHECK(block.nodes.size() == 1 && block.nodes[0].id == 99);
         return true;
     }));
@@ -476,8 +477,8 @@ void shared_file_test(files_t& files)
             ready.arrive_and_wait();
             for (size_t repeat = 0; repeat < 16; ++repeat)
             {
-                pbf_reader_t reader;
-                if (!reader.open(path.c_str()) || !reader.read_block(1, false, [](const pbf_block_t& block) {
+                eager_reader_t reader;
+                if (!reader.open(path.c_str()) || !reader.read_block(1, false, [](const eager_block_t& block) {
                         return block.nodes.size() == 1 && block.nodes[0].id == 99;
                     }))
                     success.store(false);
@@ -495,9 +496,9 @@ void many_groups_test(files_t& files)
     std::string payload = table();
     for (size_t i = 0; i < 24; ++i) payload += message(2, message(2, dense));
     const auto path = files.write(header() + zlib_block(payload));
-    pbf_reader_t reader;
+    eager_reader_t reader;
     CHECK(reader.open(path.c_str()));
-    const auto complete = [](const pbf_block_t& block) {
+    const auto complete = [](const eager_block_t& block) {
         CHECK(block.nodes.size() == 24 * 512);
         for (size_t i = 0; i < block.nodes.size(); ++i)
         {

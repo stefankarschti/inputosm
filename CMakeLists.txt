@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(inputosm VERSION 0.3.0 LANGUAGES C CXX)
+project(inputosm VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -60,6 +60,7 @@ set(SOURCES
     "include/inputosm/inputosm.h"
     "src/inputosm.cpp"
     "src/inputosmpbf.cpp"
+    "src/pbfcolumns.h"
     "src/inputosmxml.cpp"
     "src/timeutil.h"
     "src/timeutil.cpp"

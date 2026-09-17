@@ -37,6 +37,7 @@ if(BUILD_TESTING)
             -DCOUNT_BLOCKS=$<TARGET_FILE:count_blocks>
             -DSTATISTICS=$<TARGET_FILE:statistics>
             -DLAT_STAT=$<TARGET_FILE:lat_stat>
+            -DEXTRACT_FERRIES=$<TARGET_FILE:extract_ferries>
             -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/../unit/data/comprehensive.osm.pbf
             -P ${CMAKE_CURRENT_SOURCE_DIR}/output_locale_test.cmake
     )

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace input_osm
 {
@@ -76,29 +77,193 @@ struct relation_t
 };
 static_assert(sizeof(relation_t) <= 64);
 
-struct pbf_block_t
+struct pbf_parameters_t
 {
-    size_t index = 0;
-    uint64_t file_offset = 0;
-
-    std::span<const std::string_view> string_table;
-    std::span<const node_t> nodes;
-    std::span<const way_t> ways;
-    std::span<const relation_t> relations;
-
     int32_t granularity = 100;
     int64_t lat_offset = 0;
     int64_t lon_offset = 0;
     int32_t date_granularity = 1000;
 };
 
+struct pbf_counts_t
+{
+    size_t nodes = 0, ways = 0, relations = 0;
+};
+
+struct pbf_header_bbox_t
+{
+    int64_t left = 0, right = 0, top = 0, bottom = 0;
+};
+
+struct pbf_header_metadata_t
+{
+    std::optional<pbf_header_bbox_t> bbox;
+    std::span<const std::string_view> required_features, optional_features;
+    std::optional<std::string_view> writingprogram, source;
+    std::optional<int64_t> osmosis_replication_timestamp, osmosis_replication_sequence_number;
+    std::optional<std::string_view> osmosis_replication_base_url;
+};
+
+struct pbf_node_options_t
+{
+    bool id = true, latitude = false, longitude = false, tags = false, metadata = false;
+};
+struct pbf_way_options_t
+{
+    bool tags = false, node_refs = false, metadata = false, node_locations = false;
+};
+struct pbf_relation_options_t
+{
+    bool tags = false, member_ids = false, member_types = false, member_roles = false, metadata = false;
+};
+struct pbf_entity_options_t
+{
+    std::optional<pbf_node_options_t> nodes;
+    std::optional<pbf_way_options_t> ways;
+    std::optional<pbf_relation_options_t> relations;
+};
+
+struct pbf_tag_ids_t
+{
+    uint32_t key = 0, value = 0;
+};
+struct pbf_location_t
+{
+    int64_t raw_latitude = 0, raw_longitude = 0;
+};
+enum class pbf_member_type_t : uint8_t
+{
+    node,
+    way,
+    relation
+};
+enum class pbf_group_kind_t : uint8_t
+{
+    empty,
+    nodes,
+    dense_nodes,
+    ways,
+    relations
+};
+
+struct pbf_metadata_t
+{
+    enum : uint8_t
+    {
+        version_present = 1,
+        timestamp_present = 2,
+        changeset_present = 4,
+        uid_present = 8,
+        user_present = 16,
+        visible_present = 32
+    };
+    int64_t raw_timestamp = 0, changeset = 0;
+    int32_t version = -1, uid = 0;
+    uint32_t user_sid = 0;
+    uint8_t present = 0;
+    bool visible = true;
+};
+
+template <class T>
+struct pbf_list_view_t
+{
+    std::span<const uint32_t> offsets;
+    std::span<const T> values;
+    std::span<const T> operator[](size_t index) const noexcept
+    {
+        return values.subspan(offsets[index], offsets[index + 1] - offsets[index]);
+    }
+};
+
+struct pbf_batch_context_t
+{
+    size_t block_index = 0, group_index = 0, count = 0;
+    pbf_parameters_t parameters;
+};
+struct pbf_node_batch_t : pbf_batch_context_t
+{
+    pbf_node_options_t fields;
+    std::span<const int64_t> ids, raw_latitudes, raw_longitudes;
+    pbf_list_view_t<pbf_tag_ids_t> tags;
+    std::span<const pbf_metadata_t> metadata;
+};
+struct pbf_way_batch_t : pbf_batch_context_t
+{
+    pbf_way_options_t fields;
+    std::span<const int64_t> ids;
+    pbf_list_view_t<pbf_tag_ids_t> tags;
+    pbf_list_view_t<int64_t> node_refs;
+    pbf_list_view_t<pbf_location_t> node_locations;
+    std::span<const uint8_t> locations_present;
+    std::span<const pbf_metadata_t> metadata;
+};
+struct pbf_relation_batch_t : pbf_batch_context_t
+{
+    pbf_relation_options_t fields;
+    std::span<const int64_t> ids;
+    pbf_list_view_t<pbf_tag_ids_t> tags;
+    std::span<const uint32_t> member_offsets, member_roles;
+    std::span<const int64_t> member_ids;
+    std::span<const pbf_member_type_t> member_types;
+    std::span<const pbf_metadata_t> metadata;
+};
+struct pbf_group_batch_t
+{
+    size_t block_index = 0, group_index = 0;
+    pbf_group_kind_t kind = pbf_group_kind_t::empty;
+    pbf_node_batch_t nodes;
+    pbf_way_batch_t ways;
+    pbf_relation_batch_t relations;
+};
+
+using pbf_header_handler_t = std::function<bool(const pbf_header_metadata_t&)>;
+using pbf_string_handler_t = std::function<bool(std::string_view)>;
+using pbf_node_handler_t = std::function<bool(const pbf_node_batch_t&)>;
+using pbf_way_handler_t = std::function<bool(const pbf_way_batch_t&)>;
+using pbf_relation_handler_t = std::function<bool(const pbf_relation_batch_t&)>;
+using pbf_group_handler_t = std::function<bool(const pbf_group_batch_t&)>;
+
+/**
+ * @brief Borrow a data block during its block callback.
+ * @note Call methods in the callback thread. Do not retain the block reference.
+ * @note Decode methods reuse group buffers after each entity callback.
+ * @note String views remain valid until the block callback returns.
+ * @note Applications must check string ID bounds before string lookup.
+ */
+class pbf_block_t
+{
+public:
+    pbf_block_t(const pbf_block_t&) = delete;
+    pbf_block_t& operator=(const pbf_block_t&) = delete;
+    size_t index() const noexcept;
+    uint64_t file_offset() const noexcept;
+    bool parameters(pbf_parameters_t& result) const noexcept;
+    bool string_table_size(size_t& result) const noexcept;
+    bool decode_strings(const pbf_string_handler_t& handler) const noexcept;
+    bool node_count(size_t& result) const noexcept;
+    bool way_count(size_t& result) const noexcept;
+    bool relation_count(size_t& result) const noexcept;
+    bool counts(pbf_counts_t& result) const noexcept;
+    bool decode_nodes(pbf_node_options_t options, const pbf_node_handler_t& handler) const noexcept;
+    bool decode_ways(pbf_way_options_t options, const pbf_way_handler_t& handler) const noexcept;
+    bool decode_relations(pbf_relation_options_t options, const pbf_relation_handler_t& handler) const noexcept;
+    bool decode_entities(pbf_entity_options_t options, const pbf_group_handler_t& handler) const noexcept;
+    bool validate() const noexcept;
+
+private:
+    friend struct pbf_access_t;
+    explicit pbf_block_t(void* state) noexcept
+        : state_(state)
+    {
+    }
+    void* state_;
+};
 using pbf_block_handler_t = std::function<bool(const pbf_block_t&)>;
 
 /**
- * @brief Read complete PBF blocks from an open file.
+ * @brief Read opaque PBF data blocks from an open file.
  * @note Separate readers can run concurrently. Use one operation at a time on each reader.
  * @note Keep the file contents unchanged until the reader closes.
- * @note All block views remain valid only during their callback.
  */
 class pbf_reader_t
 {
@@ -113,37 +278,21 @@ public:
     bool open(const char* filename) noexcept;
     void close() noexcept;
     bool is_open() const noexcept;
-
     void set_thread_count(size_t count) noexcept;
     void set_max_thread_count() noexcept;
     size_t thread_count() const noexcept;
-
-    /** @brief Build an optional offset table for repeated indexed reads. */
     bool build_index() noexcept;
     bool has_index() const noexcept;
     size_t index_memory_bytes() const noexcept;
 
-    /**
-     * @brief Read all data blocks from the file start.
-     * @note Multiple workers can call the handler concurrently and out of file order.
-     * @return true on completion. A stop request or error produces false.
-     */
-    bool read_blocks(bool decode_metadata, const pbf_block_handler_t& handler) noexcept;
-
-    /**
-     * @brief Read one data block by its file block index.
-     * @note Without an offset table, each call scans file headers from the file start.
-     * @note The initial header has index zero. Unknown block types also occupy index positions.
-     * @note The callback runs in the calling thread.
-     * @return true if the handler returns true. An unavailable data block or error produces false.
-     */
-    bool read_block(size_t index, bool decode_metadata, const pbf_block_handler_t& handler) noexcept;
+    /** @brief Decode header metadata in the calling thread. Views last for its callback only. */
+    bool decode_header(const pbf_header_handler_t& handler) noexcept;
+    /** @brief Visit data blocks. Workers can call the handler concurrently and out of file order. */
+    bool read_blocks(const pbf_block_handler_t& handler) noexcept;
+    /** @brief Visit one data block in the calling thread. The header has file index zero. */
+    bool read_block(size_t index, const pbf_block_handler_t& handler) noexcept;
 
 private:
-    friend bool input_pbf(const char* filename) noexcept;
-    bool read_blocks(bool decode_metadata,
-                     const std::function<bool(const pbf_block_t&, bool)>& handler,
-                     bool group_batches) noexcept;
     struct impl_t;
     std::unique_ptr<impl_t> impl_;
     size_t configured_threads_ = 1;

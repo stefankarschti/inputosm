@@ -31,10 +31,12 @@ int main(int argc, char** argv)
     std::span<input_osm::Counter<uint64_t>> block_count(all_counters.data() + 3 * actual_thread_count,
                                                         actual_thread_count);
 
-    const bool result = reader.read_blocks(false, [&](const input_osm::pbf_block_t& block) {
-        node_count[input_osm::thread_index] += block.nodes.size();
-        way_count[input_osm::thread_index] += block.ways.size();
-        relation_count[input_osm::thread_index] += block.relations.size();
+    const bool result = reader.read_blocks([&](const input_osm::pbf_block_t& block) {
+        input_osm::pbf_counts_t counts;
+        if (!block.counts(counts)) return false;
+        node_count[input_osm::thread_index] += counts.nodes;
+        way_count[input_osm::thread_index] += counts.ways;
+        relation_count[input_osm::thread_index] += counts.relations;
         block_count[input_osm::thread_index] += 1;
         return true;
     });

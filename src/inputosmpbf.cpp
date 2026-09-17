@@ -44,7 +44,6 @@ extern std::function<bool(std::span<const relation_t>)> relation_handler;
 namespace
 {
 using bytes_t = std::span<const uint8_t>;
-using batch_handler_t = std::function<bool(const pbf_block_t&, bool)>;
 constexpr size_t max_header_size = 64 * 1024;
 constexpr size_t max_raw_size = 32 * 1024 * 1024;
 size_t configured_threads = 0;
@@ -88,6 +87,7 @@ public:
     {
     }
     bool empty() const { return remaining_.empty(); }
+    bytes_t remaining() const { return remaining_; }
     bytes_t take(size_t count)
     {
         require(count <= remaining_.size(), "Truncated PBF field");
@@ -301,16 +301,38 @@ struct blob_decoder_t
     }
 };
 
+template <class Visit>
+unsigned visit_group(bytes_t bytes, Visit&& visit)
+{
+    unsigned kind = 0;
+    reader_t reader(bytes);
+    while (!reader.empty())
+    {
+        const auto field = reader.next();
+        if (field.number >= 1 && field.number <= 4)
+        {
+            require(kind == 0 || kind == field.number, "Mixed entity types in a primitive group");
+            kind = field.number;
+            field.expect(2);
+            visit(field);
+        }
+        else if (field.number == 5)
+            invalid("Unsupported ChangeSet entity");
+    }
+    return kind;
+}
+
 struct decoder_t
 {
     bool metadata;
     std::vector<std::string_view> string_table;
-    std::vector<bytes_t> groups;
+    std::vector<bytes_t> groups, string_messages;
+    bool strings_ready = false;
     // The columns contain IDs, coordinates, tags, and the six DenseInfo fields.
     std::array<std::vector<field_t>, 10> dense_fields;
     blob_decoder_t raw;
     storage_t storage;
-    pbf_block_t block;
+    pbf_parameters_t block;
 
     explicit decoder_t(bool read_metadata)
         : metadata(read_metadata)
@@ -500,7 +522,7 @@ struct decoder_t
         storage.relation_tags.push_back({tag_start, keys});
         storage.relations.push_back(result);
     }
-    void collect_dense(bytes_t bytes)
+    void collect_dense(bytes_t bytes, bool skip_info = false)
     {
         reader_t reader(bytes);
         while (!reader.empty())
@@ -517,6 +539,7 @@ struct decoder_t
                     dense_fields[field.number - 7].push_back(field);
                     break;
                 case 5: {
+                    if (skip_info && !metadata) break;
                     reader_t info_reader(field.message());
                     while (!info_reader.empty())
                     {
@@ -627,26 +650,14 @@ struct decoder_t
     bool group(bytes_t bytes)
     {
         for (auto& fields : dense_fields) fields.clear();
-        unsigned kind = 0;
-        bool has_nodes = false;
-        reader_t reader(bytes);
-        while (!reader.empty())
-        {
-            const auto field = reader.next();
-            if (field.number >= 1 && field.number <= 4)
-            {
-                require(kind == 0 || kind == field.number, "Mixed entity types in a primitive group");
-                kind = field.number;
-            }
+        const auto kind = visit_group(bytes, [&](const field_t& field) {
             switch (field.number)
             {
                 case 1:
                     node(field.message());
-                    has_nodes = true;
                     break;
                 case 2:
                     collect_dense(field.message());
-                    has_nodes = true;
                     break;
                 case 3:
                     way(field.message());
@@ -654,23 +665,19 @@ struct decoder_t
                 case 4:
                     relation(field.message());
                     break;
-                case 5:
-                    throw std::runtime_error("Unsupported ChangeSet entity");
-                default:
-                    break;
             }
-        }
+        });
         if (kind == 2) dense();
-        return has_nodes;
+        return kind == 1 || kind == 2;
     }
-    void prepare(bytes_t bytes, size_t index, uint64_t offset)
+    void prepare(bytes_t bytes)
     {
         storage.clear();
         string_table.clear();
         groups.clear();
-        block = pbf_block_t{};
-        block.index = index;
-        block.file_offset = offset;
+        string_messages.clear();
+        strings_ready = false;
+        block = {};
         bool has_table = false;
         reader_t reader(bytes);
         while (!reader.empty())
@@ -678,16 +685,10 @@ struct decoder_t
             const auto field = reader.next();
             switch (field.number)
             {
-                case 1: {
+                case 1:
                     has_table = true;
-                    reader_t strings(field.message());
-                    while (!strings.empty())
-                    {
-                        const auto entry = strings.next();
-                        if (entry.number == 1) string_table.push_back(text(entry.message()));
-                    }
+                    string_messages.push_back(field.message());
                     break;
-                }
                 case 2:
                     groups.push_back(field.message());
                     break;
@@ -707,11 +708,28 @@ struct decoder_t
                     break;
             }
         }
-        require(has_table && !string_table.empty() && string_table[0].empty(), "Invalid or missing PBF string table");
+        require(has_table, "Missing PBF string table");
         require(block.granularity > 0 && block.date_granularity > 0, "Invalid PBF granularity");
-        block.string_table = string_table;
+    }
+    void ensure_strings()
+    {
+        if (strings_ready) return;
+        string_table.clear();
+        for (auto bytes : string_messages)
+        {
+            reader_t strings(bytes);
+            while (!strings.empty())
+            {
+                auto field = strings.next();
+                if (field.number == 1) string_table.push_back(text(field.message()));
+            }
+        }
+        require(!string_table.empty() && string_table[0].empty(), "Invalid PBF string table");
+        strings_ready = true;
     }
 };
+
+#include "pbfcolumns.h"
 
 struct descriptor_t
 {
@@ -953,39 +971,370 @@ struct callback_scope_t
     }
 };
 
-bool decode_block(const descriptor_t& descriptor,
-                  decoder_t& decoder,
-                  const batch_handler_t& handler,
-                  size_t worker,
-                  const std::atomic<bool>* stopped = nullptr,
-                  bool group_batches = false)
+struct scratch_t
 {
-    const auto bytes = blob_data(descriptor.blob, decoder.raw);
-    decoder.prepare(bytes, descriptor.index, descriptor.offset);
-    const auto invoke = [&](bool has_nodes) {
-        decoder.storage.finish();
-        decoder.block.nodes = decoder.storage.nodes;
-        decoder.block.ways = decoder.storage.ways;
-        decoder.block.relations = decoder.storage.relations;
-        if (stopped && stopped->load(std::memory_order_relaxed)) return false;
-        const callback_scope_t scope(worker, descriptor.index);
-        return handler(decoder.block, has_nodes);
-    };
-    for (const auto group : decoder.groups)
+    bool active = false;
+    decoder_t decoder{false};
+    columns_t columns;
+};
+thread_local std::vector<std::unique_ptr<scratch_t>> scratch_pool;
+
+struct block_state_t
+{
+    descriptor_t descriptor;
+    bool locations_allowed;
+    const std::thread::id owner = std::this_thread::get_id();
+    std::atomic<bool>* stopped;
+    bool failed = false, busy = false;
+    scratch_t* scratch = nullptr;
+    unsigned count_mask = 0;
+    pbf_counts_t cached_counts{};
+    std::optional<size_t> string_count{};
+
+    ~block_state_t()
     {
-        if (stopped && stopped->load(std::memory_order_relaxed)) return false;
-        if (group_batches) decoder.storage.clear();
-        const bool has_nodes = decoder.group(group);
-        if (group_batches && !invoke(has_nodes)) return false;
+        if (scratch)
+        {
+            scratch->decoder.groups.clear();
+            scratch->decoder.string_messages.clear();
+            scratch->decoder.string_table.clear();
+            for (auto& fields : scratch->decoder.dense_fields) fields.clear();
+            scratch->decoder.storage.clear();
+            scratch->columns.clear();
+            scratch->active = false;
+        }
     }
-    return group_batches || invoke(true);
+    decoder_t& prepare()
+    {
+        if (scratch) return scratch->decoder;
+        for (auto& slot : scratch_pool)
+            if (!slot->active)
+            {
+                scratch = slot.get();
+                break;
+            }
+        if (!scratch)
+        {
+            scratch_pool.push_back(std::make_unique<scratch_t>());
+            scratch = scratch_pool.back().get();
+        }
+        scratch->active = true;
+        auto& decoder = scratch->decoder;
+        decoder.prepare(blob_data(descriptor.blob, decoder.raw));
+        return decoder;
+    }
+    bool active() const { return !failed && (!stopped || !stopped->load(std::memory_order_relaxed)); }
+    template <class Work>
+    bool run(Work&& work) noexcept
+    {
+        try
+        {
+            require(owner == std::this_thread::get_id(), "PBF block used from another thread");
+            require(!busy, "Recursive PBF block operation");
+            if (!active()) return false;
+            busy = true;
+            struct reset_t
+            {
+                bool& value;
+                ~reset_t() { value = false; }
+            } reset{busy};
+            if (work() && active()) return true;
+        }
+        catch (const std::exception& error)
+        {
+            IOSM_ERROR("PBF block {} at offset {}: {}", descriptor.index, descriptor.offset, error.what());
+        }
+        catch (...)
+        {
+            IOSM_ERROR("PBF block {}: callback exception", descriptor.index);
+        }
+        failed = true;
+        if (stopped) stopped->store(true, std::memory_order_relaxed);
+        return false;
+    }
+    pbf_counts_t count(unsigned mask)
+    {
+        mask &= ~count_mask;
+        if (!mask) return cached_counts;
+        auto& decoder = prepare();
+        auto result = cached_counts;
+        for (auto group : decoder.groups)
+        {
+            require(active(), "PBF operation stopped");
+            visit_group(group, [&](const field_t& field) {
+                if (field.number == 1 && (mask & 1)) ++result.nodes;
+                if (field.number == 3 && (mask & 2)) ++result.ways;
+                if (field.number == 4 && (mask & 4)) ++result.relations;
+                if (field.number == 2 && (mask & 1))
+                {
+                    reader_t dense(field.message());
+                    while (!dense.empty())
+                    {
+                        const auto column = dense.next();
+                        if (column.number == 1) result.nodes += value_count(column);
+                    }
+                }
+            });
+        }
+        cached_counts = result;
+        count_mask |= mask;
+        return result;
+    }
+    template <class Visit>
+    bool strings(Visit&& visit)
+    {
+        size_t count = 0;
+        for (auto bytes : prepare().string_messages)
+        {
+            reader_t reader(bytes);
+            while (!reader.empty())
+            {
+                const auto field = reader.next();
+                if (field.number != 1) continue;
+                const auto value = text(field.message());
+                require(count != 0 || value.empty(), "PBF string zero must be empty");
+                ++count;
+                if (!visit(value)) return false;
+            }
+        }
+        require(count != 0, "Empty PBF string table");
+        string_count = count;
+        return true;
+    }
+    bool decode(const pbf_entity_options_t& options, const pbf_group_handler_t& handler)
+    {
+        auto& decoder = prepare();
+        auto& columns = scratch->columns;
+        pbf_counts_t totals;
+        for (size_t index = 0; index < decoder.groups.size(); ++index)
+        {
+            if (!active()) return false;
+            columns.clear();
+            for (auto& fields : decoder.dense_fields) fields.clear();
+            decoder.metadata = options.nodes && options.nodes->metadata;
+            const auto kind = visit_group(decoder.groups[index], [&](const field_t& field) {
+                if (field.number == 2)
+                {
+                    if (options.nodes) decoder.collect_dense(field.message(), true);
+                }
+                else if ((field.number == 1 && options.nodes) || (field.number == 3 && options.ways) ||
+                         (field.number == 4 && options.relations))
+                    columns.ordinary(field.message(), field.number, options, locations_allowed);
+            });
+            if (kind == 2 && options.nodes) columns.dense(decoder.dense_fields, *options.nodes);
+            columns.empty_lists(kind, options);
+            if (kind <= 2) totals.nodes += columns.count;
+            if (kind == 3) totals.ways += columns.count;
+            if (kind == 4) totals.relations += columns.count;
+            if (!handler(columns.batch(descriptor.index, index, kind, decoder.block, options))) return false;
+        }
+        if (options.nodes)
+        {
+            cached_counts.nodes = totals.nodes;
+            count_mask |= 1;
+        }
+        if (options.ways)
+        {
+            cached_counts.ways = totals.ways;
+            count_mask |= 2;
+        }
+        if (options.relations)
+        {
+            cached_counts.relations = totals.relations;
+            count_mask |= 4;
+        }
+        return true;
+    }
+};
+} // namespace
+
+struct pbf_access_t
+{
+    static block_state_t& state(const pbf_block_t& block) { return *static_cast<block_state_t*>(block.state_); }
+    static bool invoke(const descriptor_t& descriptor,
+                       bool locations,
+                       const pbf_block_handler_t& handler,
+                       size_t worker,
+                       std::atomic<bool>* stopped)
+    {
+        block_state_t state{descriptor, locations, std::this_thread::get_id(), stopped};
+        const pbf_block_t block(&state);
+        const callback_scope_t scope(worker, descriptor.index);
+        return handler(block) && state.active();
+    }
+    static bool legacy(const pbf_block_t& block,
+                       bool metadata,
+                       const std::function<bool(std::span<const node_t>)>& nodes,
+                       const std::function<bool(std::span<const way_t>)>& ways,
+                       const std::function<bool(std::span<const relation_t>)>& relations)
+    {
+        auto& state = pbf_access_t::state(block);
+        return state.run([&] {
+            auto& decoder = state.prepare();
+            decoder.metadata = metadata;
+            decoder.ensure_strings();
+            for (auto group : decoder.groups)
+            {
+                if (!state.active()) return false;
+                decoder.storage.clear();
+                const bool has_nodes = decoder.group(group);
+                decoder.storage.finish();
+                if (has_nodes && nodes && !nodes(decoder.storage.nodes)) return false;
+                if (ways && !ways(decoder.storage.ways)) return false;
+                if (relations && !relations(decoder.storage.relations)) return false;
+            }
+            return true;
+        });
+    }
+};
+
+size_t pbf_block_t::index() const noexcept
+{
+    return pbf_access_t::state(*this).descriptor.index;
 }
+uint64_t pbf_block_t::file_offset() const noexcept
+{
+    return pbf_access_t::state(*this).descriptor.offset;
+}
+bool pbf_block_t::parameters(pbf_parameters_t& result) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    pbf_parameters_t value;
+    if (!state.run([&] {
+            value = state.prepare().block;
+            return true;
+        }))
+        return false;
+    result = value;
+    return true;
+}
+bool pbf_block_t::counts(pbf_counts_t& result) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    pbf_counts_t value;
+    if (!state.run([&] {
+            value = state.count(7);
+            return true;
+        }))
+        return false;
+    result = value;
+    return true;
+}
+bool pbf_block_t::node_count(size_t& result) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    size_t value;
+    if (!state.run([&] {
+            value = state.count(1).nodes;
+            return true;
+        }))
+        return false;
+    result = value;
+    return true;
+}
+bool pbf_block_t::way_count(size_t& result) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    size_t value;
+    if (!state.run([&] {
+            value = state.count(2).ways;
+            return true;
+        }))
+        return false;
+    result = value;
+    return true;
+}
+bool pbf_block_t::relation_count(size_t& result) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    size_t value;
+    if (!state.run([&] {
+            value = state.count(4).relations;
+            return true;
+        }))
+        return false;
+    result = value;
+    return true;
+}
+bool pbf_block_t::string_table_size(size_t& result) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    size_t value = 0;
+    if (!state.run([&] {
+            if (!state.string_count && !state.strings([](std::string_view) { return true; })) return false;
+            value = *state.string_count;
+            return true;
+        }))
+        return false;
+    result = value;
+    return true;
+}
+bool pbf_block_t::decode_strings(const pbf_string_handler_t& handler) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    return state.run([&] {
+        require(bool(handler), "Empty PBF string handler");
+        return state.strings(handler);
+    });
+}
+bool pbf_block_t::decode_entities(pbf_entity_options_t options, const pbf_group_handler_t& handler) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    return state.run([&] {
+        require(bool(handler), "Empty PBF entity handler");
+        return state.decode(options, handler);
+    });
+}
+bool pbf_block_t::decode_nodes(pbf_node_options_t options, const pbf_node_handler_t& handler) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    return state.run([&] {
+        require(bool(handler), "Empty PBF node handler");
+        return state.decode({options, {}, {}}, [&](const pbf_group_batch_t& batch) {
+            return (batch.kind != pbf_group_kind_t::nodes && batch.kind != pbf_group_kind_t::dense_nodes) ||
+                   handler(batch.nodes);
+        });
+    });
+}
+bool pbf_block_t::decode_ways(pbf_way_options_t options, const pbf_way_handler_t& handler) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    return state.run([&] {
+        require(bool(handler), "Empty PBF way handler");
+        return state.decode({{}, options, {}}, [&](const pbf_group_batch_t& batch) {
+            return batch.kind != pbf_group_kind_t::ways || handler(batch.ways);
+        });
+    });
+}
+bool pbf_block_t::decode_relations(pbf_relation_options_t options, const pbf_relation_handler_t& handler) const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    return state.run([&] {
+        require(bool(handler), "Empty PBF relation handler");
+        return state.decode({{}, {}, options}, [&](const pbf_group_batch_t& batch) {
+            return batch.kind != pbf_group_kind_t::relations || handler(batch.relations);
+        });
+    });
+}
+bool pbf_block_t::validate() const noexcept
+{
+    auto& state = pbf_access_t::state(*this);
+    return state.run([&] {
+        if (!state.strings([](std::string_view) { return true; })) return false;
+        return state.decode({pbf_node_options_t{true, true, true, true, true},
+                             pbf_way_options_t{true, true, true, true},
+                             pbf_relation_options_t{true, true, true, true, true}},
+                            [](const auto&) { return true; });
+    });
+}
+
+namespace
+{
 
 struct context_t
 {
-    bool metadata;
-    bool group_batches;
-    const batch_handler_t& handler;
+    bool locations;
+    const pbf_block_handler_t& handler;
     std::mutex mutex;
     std::condition_variable data_ready;
     std::condition_variable space_ready;
@@ -996,9 +1345,8 @@ struct context_t
     std::atomic<bool> stopped{false};
     bool finished = false;
 
-    context_t(bool read_metadata, const batch_handler_t& block_handler, size_t count, bool groups)
-        : metadata(read_metadata),
-          group_batches(groups),
+    context_t(bool has_locations, const pbf_block_handler_t& block_handler, size_t count)
+        : locations(has_locations),
           handler(block_handler),
           queue(count > 1 ? 2 * count : 0)
     {
@@ -1013,11 +1361,11 @@ struct context_t
         space_ready.notify_all();
     }
     bool active() const { return !stopped.load(std::memory_order_relaxed); }
-    bool process(const descriptor_t& descriptor, decoder_t& decoder, size_t worker)
+    bool process(const descriptor_t& descriptor, size_t worker)
     {
         try
         {
-            if (decode_block(descriptor, decoder, handler, worker, &stopped, group_batches)) return true;
+            if (pbf_access_t::invoke(descriptor, locations, handler, worker, &stopped)) return true;
         }
         catch (const std::exception& error)
         {
@@ -1037,7 +1385,6 @@ struct context_t
     }
     void worker(size_t index)
     {
-        decoder_t decoder(metadata);
         for (;;)
         {
             descriptor_t descriptor;
@@ -1050,12 +1397,12 @@ struct context_t
                 --queued;
             }
             space_ready.notify_one();
-            if (!process(descriptor, decoder, index)) return;
+            if (!process(descriptor, index)) return;
         }
     }
 };
 
-bool read_all(bytes_t bytes, context_t& context, size_t count, decoder_t& decoder)
+bool read_all(bytes_t bytes, context_t& context, size_t count)
 {
     reader_t reader(bytes);
     size_t index = 0;
@@ -1079,7 +1426,7 @@ bool read_all(bytes_t bytes, context_t& context, size_t count, decoder_t& decode
             if (descriptor.type != "OSMData") continue;
             if (count == 1)
             {
-                if (!context.process(descriptor, decoder, 0)) break;
+                if (!context.process(descriptor, 0)) break;
                 continue;
             }
             std::unique_lock lock(context.mutex);
@@ -1124,8 +1471,12 @@ size_t effective_threads(size_t count)
 struct pbf_reader_t::impl_t
 {
     std::shared_ptr<mapping_t> mapping;
-    std::unique_ptr<decoder_t> decoder;
     std::vector<uint64_t> offsets;
+    blob_decoder_t header_storage;
+    bytes_t header_bytes;
+    bool locations = false;
+    std::atomic<bool> busy{false};
+    std::vector<std::string_view> required_features, optional_features;
 
     explicit impl_t(const char* filename)
         : mapping(open_mapping(filename))
@@ -1133,16 +1484,25 @@ struct pbf_reader_t::impl_t
         reader_t reader(mapping->bytes());
         const auto header = read_descriptor(reader, 0, 0);
         require(header.type == "OSMHeader", "Missing initial OSMHeader");
-        blob_decoder_t raw;
-        validate_header(blob_data(header.blob, raw));
+        header_bytes = blob_data(header.blob, header_storage);
+        validate_header(header_bytes);
+        reader_t fields(header_bytes);
+        while (!fields.empty())
+        {
+            const auto field = fields.next();
+            if (field.number == 5 && text(field.message()) == "LocationsOnWays") locations = true;
+        }
     }
-
-    decoder_t& get_decoder(bool metadata)
+    struct operation_t
     {
-        if (!decoder) decoder = std::make_unique<decoder_t>(metadata);
-        decoder->metadata = metadata;
-        return *decoder;
-    }
+        impl_t& impl;
+        explicit operation_t(impl_t& value)
+            : impl(value)
+        {
+            require(!impl.busy.exchange(true), "PBF reader already has an active operation");
+        }
+        ~operation_t() { impl.busy.store(false); }
+    };
 };
 
 pbf_reader_t::pbf_reader_t() noexcept = default;
@@ -1182,6 +1542,11 @@ bool pbf_reader_t::open(const char* filename) noexcept
 }
 void pbf_reader_t::close() noexcept
 {
+    if (impl_ && impl_->busy.load())
+    {
+        IOSM_ERROR("Cannot close an active PBF reader");
+        return;
+    }
     impl_.reset();
 }
 bool pbf_reader_t::is_open() const noexcept
@@ -1214,6 +1579,7 @@ bool pbf_reader_t::build_index() noexcept
     try
     {
         require(bool(impl_), "PBF reader is closed");
+        impl_t::operation_t operation(*impl_);
         if (has_index()) return true;
         const auto bytes = impl_->mapping->bytes();
         reader_t reader(bytes);
@@ -1241,51 +1607,120 @@ bool pbf_reader_t::build_index() noexcept
     return false;
 }
 
-bool pbf_reader_t::read_blocks(bool metadata, const pbf_block_handler_t& handler) noexcept
-{
-    try
-    {
-        require(bool(handler), "Empty PBF block handler");
-        return read_blocks(metadata, [&handler](const pbf_block_t& block, bool) { return handler(block); }, false);
-    }
-    catch (...)
-    {
-        IOSM_ERROR("PBF block handler failure");
-        return false;
-    }
-}
-
-bool pbf_reader_t::read_blocks(bool metadata, const batch_handler_t& handler, bool group_batches) noexcept
+bool pbf_reader_t::decode_header(const pbf_header_handler_t& handler) noexcept
 {
     try
     {
         require(bool(impl_), "PBF reader is closed");
-        require(bool(handler), "Empty PBF block handler");
-        context_t context(metadata, handler, configured_threads_, group_batches);
-        const bool result = read_all(
-            impl_->mapping->bytes(), context, configured_threads_, impl_->get_decoder(metadata));
-        if (!result) impl_->decoder.reset();
-        return result;
+        impl_t::operation_t operation(*impl_);
+        require(bool(handler), "Empty PBF header handler");
+        pbf_header_metadata_t result;
+        impl_->required_features.clear();
+        impl_->optional_features.clear();
+        reader_t reader(impl_->header_bytes);
+        unsigned bbox_fields = 0;
+        while (!reader.empty())
+        {
+            const auto field = reader.next();
+            switch (field.number)
+            {
+                case 1: {
+                    if (!result.bbox) result.bbox.emplace();
+                    reader_t bbox(field.message());
+                    while (!bbox.empty())
+                    {
+                        const auto coordinate = bbox.next();
+                        if (coordinate.number < 1 || coordinate.number > 4) continue;
+                        const auto value = zigzag(coordinate.integer());
+                        switch (coordinate.number)
+                        {
+                            case 1:
+                                result.bbox->left = value;
+                                break;
+                            case 2:
+                                result.bbox->right = value;
+                                break;
+                            case 3:
+                                result.bbox->top = value;
+                                break;
+                            case 4:
+                                result.bbox->bottom = value;
+                                break;
+                        }
+                        bbox_fields |= 1u << (coordinate.number - 1);
+                    }
+                    break;
+                }
+                case 4:
+                    impl_->required_features.push_back(text(field.message()));
+                    break;
+                case 5:
+                    impl_->optional_features.push_back(text(field.message()));
+                    break;
+                case 16:
+                    result.writingprogram = text(field.message());
+                    break;
+                case 17:
+                    result.source = text(field.message());
+                    break;
+                case 32:
+                    result.osmosis_replication_timestamp = signed_integer(field.integer());
+                    break;
+                case 33:
+                    result.osmosis_replication_sequence_number = signed_integer(field.integer());
+                    break;
+                case 34:
+                    result.osmosis_replication_base_url = text(field.message());
+                    break;
+                default:
+                    break;
+            }
+        }
+        require(!result.bbox || bbox_fields == 15, "Missing PBF bounding box coordinate");
+        result.required_features = impl_->required_features;
+        result.optional_features = impl_->optional_features;
+        return handler(result);
     }
     catch (const std::exception& error)
     {
-        IOSM_ERROR("PBF input: {}", error.what());
+        IOSM_ERROR("PBF header: {}", error.what());
     }
     catch (...)
     {
-        IOSM_ERROR("PBF input failure");
+        IOSM_ERROR("PBF header callback failure");
     }
-    if (impl_) impl_->decoder.reset();
     return false;
 }
 
-bool pbf_reader_t::read_block(size_t index, bool metadata, const pbf_block_handler_t& handler) noexcept
+bool pbf_reader_t::read_blocks(const pbf_block_handler_t& handler) noexcept
+{
+    try
+    {
+        require(bool(impl_), "PBF reader is closed");
+        impl_t::operation_t operation(*impl_);
+        require(bool(handler), "Empty PBF block handler");
+        context_t context(impl_->locations, handler, thread_count());
+        return read_all(impl_->mapping->bytes(), context, thread_count());
+    }
+    catch (const std::exception& error)
+    {
+        IOSM_ERROR("PBF read: {}", error.what());
+    }
+    catch (...)
+    {
+        IOSM_ERROR("PBF read failure");
+    }
+    return false;
+}
+
+bool pbf_reader_t::read_block(size_t index, const pbf_block_handler_t& handler) noexcept
 {
     uint64_t offset = 0;
     size_t scanned = 0;
     try
     {
         require(bool(impl_), "PBF reader is closed");
+        impl_t::operation_t operation(*impl_);
         require(bool(handler), "Empty PBF block handler");
         const auto bytes = impl_->mapping->bytes();
         descriptor_t selected;
@@ -1311,13 +1746,7 @@ bool pbf_reader_t::read_block(size_t index, bool metadata, const pbf_block_handl
             }
         }
         require(selected.type == "OSMData", "Requested PBF block is not OSMData");
-        const bool result = decode_block(
-            selected,
-            impl_->get_decoder(metadata),
-            [&handler](const pbf_block_t& block, bool) { return handler(block); },
-            0);
-        if (!result) impl_->decoder.reset();
-        return result;
+        return pbf_access_t::invoke(selected, impl_->locations, handler, 0, nullptr);
     }
     catch (const std::exception& error)
     {
@@ -1331,7 +1760,6 @@ bool pbf_reader_t::read_block(size_t index, bool metadata, const pbf_block_handl
     {
         IOSM_ERROR("PBF request {} at offset {}: callback exception", index, static_cast<unsigned long long>(offset));
     }
-    if (impl_) impl_->decoder.reset();
     return false;
 }
 
@@ -1364,14 +1792,7 @@ bool input_pbf(const char* filename) noexcept
         reader.set_thread_count(thread_count());
         if (!reader.open(filename)) return false;
         return reader.read_blocks(
-            metadata,
-            [&](const pbf_block_t& block, bool has_nodes) {
-                if (has_nodes && nodes && !nodes(block.nodes)) return false;
-                if (ways && !ways(block.ways)) return false;
-                if (relations && !relations(block.relations)) return false;
-                return true;
-            },
-            true);
+            [&](const pbf_block_t& block) { return pbf_access_t::legacy(block, metadata, nodes, ways, relations); });
     }
     catch (const std::exception& error)
     {
