@@ -244,15 +244,16 @@ This option does not change how the XML reader reads metadata attributes.
 
 ### Read complete PBF blocks
 
-Use `input_pbf_blocks()` for one callback per `OSMData` block.
+Use `pbf_reader_t::read_blocks()` for one callback per `OSMData` block.
 The callback receives all nodes, ways, relations, and string table entries from that block.
 The Boolean result is `true` on completion and `false` on cancellation or error.
-The function reads PBF content without a filename extension check.
+The reader opens PBF content without a filename extension check.
 
 ```cpp
-input_osm::set_thread_count(1);
-const bool ok = input_osm::input_pbf_blocks(
-    "map.osm.pbf", false,
+input_osm::pbf_reader_t reader;
+reader.set_max_thread_count();
+const bool ok = reader.open("map.osm.pbf") && reader.read_blocks(
+    false,
     [](const input_osm::pbf_block_t& block) {
         for (const auto& way : block.ways)
             for (const auto& tag : way.tags)
@@ -267,7 +268,7 @@ The `count_blocks` integration example counts blocks and entities.
 `block.file_offset` identifies the four-byte length field in the input file.
 The block also exposes `granularity`, `lat_offset`, `lon_offset`, and `date_granularity`.
 
-Both PBF APIs use string views directly into raw or decompressed block bytes.
+All PBF input methods use string views directly into raw or decompressed block bytes.
 A complete block callback also receives `std::span<const std::string_view> string_table`.
 This span preserves table indexes, duplicates, empty strings, and unused entries.
 A missing or invalid table causes an error before the block callback.
@@ -276,7 +277,67 @@ It rejects unsupported required features, including historical visibility.
 
 With one thread, callbacks run in file order in the calling thread.
 With multiple threads, callbacks can overlap and finish in a different order.
-Refer to the [block API design](docs/pbf-block-callback-proposal.md) for the complete contract.
+The reader keeps its file mapping until `close()` or destruction.
+Each sequential call starts at the file start.
+Keep the file contents unchanged while the reader is open.
+Refer to the [reader design](docs/pbf-random-access-proposal.md) for the complete contract.
+The [performance report](docs/pbf-reader-performance.md) compares sequential reads, random scans, and offset tables.
+
+### Read a block by index
+
+Use `read_block()` with a file block index from an earlier block callback.
+The method calls the handler once in the calling thread.
+Header blocks, unknown block types, and unavailable indexes cause `false` without a callback.
+
+```cpp
+input_osm::pbf_reader_t reader;
+if (!reader.open("map.osm.pbf")) return 1;
+if (!reader.build_index()) return 1;
+const bool ok = reader.read_block(100, false, [](const input_osm::pbf_block_t& block) {
+    fmt::print("Block {} has {} nodes\n", block.index, block.nodes.size());
+    return true;
+});
+```
+
+`build_index()` is optional.
+Without it, each indexed read scans earlier block headers and skips their payloads.
+With it, the reader uses an in-memory offset table to find the requested block directly.
+The table uses eight bytes per file block, plus vector capacity overhead.
+`index_memory_bytes()` reports the allocated vector storage in bytes.
+`has_index()` reports whether the table is available.
+
+Index construction checks framing through the file end without decoding data payloads.
+An invalid later frame can make index construction fail even when an earlier block supports a scan-based read.
+A failed index construction leaves the reader open without a partial table.
+An existing index remains available after a payload decoding error.
+Sequential reads always use a bounded queue and do not require an index.
+
+Use separate reader objects for simultaneous indexed requests.
+Each reader keeps its own offset table and decoder storage.
+The [benchmark guide](test/benchmark/README.md) describes the scan and index comparison.
+
+### Migrate to version 0.3.0
+
+This version replaces the free `input_pbf_blocks()` function with `pbf_reader_t::read_blocks()`.
+Rebuild dependent applications with the new headers and library.
+
+1. Construct a reader.
+2. Configure its member thread setting.
+3. Open the input file.
+4. Call `read_blocks()` with the metadata setting and block handler.
+
+Each reader starts with one thread.
+Global thread settings apply to `input_file()` and do not configure independent reader objects.
+Reader callbacks use their block argument and thread-local context instead of the global `file_type` and `osc_mode` variables.
+
+PBF `input_file()` uses a temporary reader and preserves primitive-group entity batches.
+The reader uses one decoder implementation for entity and block callbacks.
+Public block callbacks receive complete blocks.
+A handler failure stops subsequent entity calls for that group.
+Other callbacks that already started can finish during cancellation.
+Complete block callbacks require more decoder memory than primitive-group entity callbacks.
+Readers of the same unchanged file share its mapping and keep separate decoders and indexes.
+XML and OSC callback rules remain unchanged.
 
 ### Migrate to version 0.2.0
 
@@ -301,6 +362,9 @@ XML and OSC use the same public entity types with views into temporary owned str
 | `set_thread_count(size_t)` | Set the number of PBF threads. The hardware thread count is the maximum. |
 | `set_max_thread_count()` | Select the hardware thread count for PBF input. |
 | `thread_count()` | Get the configured thread count. The minimum result is 1. |
+| `pbf_reader_t::set_thread_count(size_t)` | Set the sequential worker count for this reader. Zero selects one thread. |
+| `pbf_reader_t::set_max_thread_count()` | Select the hardware thread count for this reader. |
+| `pbf_reader_t::thread_count()` | Get this reader's sequential worker count. Indexed reads use the calling thread. |
 | `thread_index` | Thread-local index for this worker. |
 | `block_index` | Thread-local index for this PBF block. |
 | `set_verbose(bool)` | Set the verbose flag. The reader does not use this flag. |
@@ -324,9 +388,15 @@ Use a different counter for each thread.
 If threads share data, use synchronization to prevent concurrent changes.
 Use `thread_index` to select the array or vector entry for this thread.
 
-The library also uses global configuration and parser state.
-Do not run concurrent or recursive input operations with either input API.
-Set the thread configuration and log configuration before you read a file.
+Separate reader objects can run concurrently with independent thread settings and handlers.
+Use one public operation at a time on each reader.
+Do not use `thread_index` as a unique worker identifier across different readers.
+The reader restores thread-local context after each callback.
+
+`input_file()` still uses global configuration and parser state.
+Do not run an independent input operation while `input_file()` is active.
+Do not start an input operation from an input callback.
+Set log configuration before concurrent operations start.
 
 ### Internal time functions
 
@@ -618,7 +688,11 @@ File input, decompression, and callbacks can limit throughput.
 2. The reader checks the header before it adds data blocks to a bounded work queue.
 3. Worker threads get blocks from the queue and decompress the data when necessary.
 4. Each worker decodes entities into vectors for that thread.
-5. Each worker calls entity handlers or one handler for the complete decoded block.
+5. Each worker calls one handler for the complete decoded block.
+6. For `input_file()`, the reader delivers primitive-group spans through an entity adapter.
+
+An indexed read uses the offset table or scans headers from the file start.
+It decodes only the requested data block in the calling thread.
 
 ### XML reader
 
@@ -635,7 +709,7 @@ Refer to section 11 for coordinate conversion.
 ### How do I stop before the end of a file?
 
 Return `false` from a handler to tell the reader to stop.
-For PBF input, both APIs return `false` after a stop request or an error.
+For PBF input, all read methods return `false` after a stop request or an error.
 All workers stop before the input function returns.
 Callbacks with prior permission can still finish during cancellation.
 With one thread, no subsequent callback runs after a stop request.

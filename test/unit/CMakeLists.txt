@@ -19,6 +19,14 @@ target_link_libraries(pbf_block_test PRIVATE inputosm::inputosm libdeflate::libd
 add_test(NAME pbf_block COMMAND pbf_block_test)
 set_tests_properties(pbf_block PROPERTIES LABELS unit TIMEOUT 60)
 
+add_executable(pbf_reader_test pbf_reader_test.cpp)
+target_link_libraries(pbf_reader_test PRIVATE inputosm::inputosm libdeflate::libdeflate_static Threads::Threads)
+if(INPUTOSM_BENCH_INDEPENDENT_MAPS)
+    target_compile_definitions(pbf_reader_test PRIVATE INPUTOSM_BENCH_INDEPENDENT_MAPS)
+endif()
+add_test(NAME pbf_reader COMMAND pbf_reader_test)
+set_tests_properties(pbf_reader PROPERTIES LABELS unit TIMEOUT 60)
+
 add_executable(output_format_test output_format_test.cpp)
 target_include_directories(output_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 target_link_libraries(output_format_test PRIVATE inputosm::inputosm fmt::fmt)

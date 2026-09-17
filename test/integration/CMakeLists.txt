@@ -27,6 +27,9 @@ target_link_libraries(custom_log PRIVATE Threads::Threads inputosm::inputosm fmt
 add_executable(count_blocks count_blocks.cpp)
 target_link_libraries(count_blocks PRIVATE inputosm::inputosm fmt::fmt)
 
+add_executable(read_block read_block.cpp)
+target_link_libraries(read_block PRIVATE inputosm::inputosm fmt::fmt)
+
 if(BUILD_TESTING)
     add_test(NAME output_locale
         COMMAND ${CMAKE_COMMAND}

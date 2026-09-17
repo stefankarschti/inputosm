@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 namespace input_osm
 {
@@ -94,12 +95,59 @@ struct pbf_block_t
 using pbf_block_handler_t = std::function<bool(const pbf_block_t&)>;
 
 /**
- * @brief Read complete PBF blocks.
- * @note All views remain valid only during the callback.
- * @note With multiple threads, callbacks can run concurrently and out of file order.
- * @return true on completion. A stop request or error produces false.
+ * @brief Read complete PBF blocks from an open file.
+ * @note Separate readers can run concurrently. Use one operation at a time on each reader.
+ * @note Keep the file contents unchanged until the reader closes.
+ * @note All block views remain valid only during their callback.
  */
-bool input_pbf_blocks(const char* filename, bool decode_metadata, pbf_block_handler_t block_handler) noexcept;
+class pbf_reader_t
+{
+public:
+    pbf_reader_t() noexcept;
+    ~pbf_reader_t();
+    pbf_reader_t(const pbf_reader_t&) = delete;
+    pbf_reader_t& operator=(const pbf_reader_t&) = delete;
+    pbf_reader_t(pbf_reader_t&& other) noexcept;
+    pbf_reader_t& operator=(pbf_reader_t&& other) noexcept;
+
+    bool open(const char* filename) noexcept;
+    void close() noexcept;
+    bool is_open() const noexcept;
+
+    void set_thread_count(size_t count) noexcept;
+    void set_max_thread_count() noexcept;
+    size_t thread_count() const noexcept;
+
+    /** @brief Build an optional offset table for repeated indexed reads. */
+    bool build_index() noexcept;
+    bool has_index() const noexcept;
+    size_t index_memory_bytes() const noexcept;
+
+    /**
+     * @brief Read all data blocks from the file start.
+     * @note Multiple workers can call the handler concurrently and out of file order.
+     * @return true on completion. A stop request or error produces false.
+     */
+    bool read_blocks(bool decode_metadata, const pbf_block_handler_t& handler) noexcept;
+
+    /**
+     * @brief Read one data block by its file block index.
+     * @note Without an offset table, each call scans file headers from the file start.
+     * @note The initial header has index zero. Unknown block types also occupy index positions.
+     * @note The callback runs in the calling thread.
+     * @return true if the handler returns true. An unavailable data block or error produces false.
+     */
+    bool read_block(size_t index, bool decode_metadata, const pbf_block_handler_t& handler) noexcept;
+
+private:
+    friend bool input_pbf(const char* filename) noexcept;
+    bool read_blocks(bool decode_metadata,
+                     const std::function<bool(const pbf_block_t&, bool)>& handler,
+                     bool group_batches) noexcept;
+    struct impl_t;
+    std::unique_ptr<impl_t> impl_;
+    size_t configured_threads_ = 1;
+};
 
 enum class file_type_t
 {

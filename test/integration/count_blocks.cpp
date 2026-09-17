@@ -1,9 +1,11 @@
+#include "counter.h"
 #include <inputosm/inputosm.h>
 
 #include <cstdint>
 #include <cstdlib>
 #include <fmt/format.h>
 #include <cstdio>
+#include <numeric>
 
 int main(int argc, char** argv)
 {
@@ -13,17 +15,27 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    input_osm::set_thread_count(1);
-    uint64_t blocks = 0;
-    uint64_t nodes = 0;
-    uint64_t ways = 0;
-    uint64_t relations = 0;
+    input_osm::pbf_reader_t reader;
+    reader.set_max_thread_count();
+    if (!reader.open(argv[1])) return EXIT_FAILURE;
 
-    const bool result = input_osm::input_pbf_blocks(argv[1], false, [&](const input_osm::pbf_block_t& block) {
-        ++blocks;
-        nodes += block.nodes.size();
-        ways += block.ways.size();
-        relations += block.relations.size();
+    // Allocate memory for all counters in one operation.
+    const size_t actual_thread_count = reader.thread_count();
+    std::vector<input_osm::Counter<uint64_t>> all_counters(4 * actual_thread_count);
+
+    // Use a different span for each entity type.
+    std::span<input_osm::Counter<uint64_t>> node_count(all_counters.data(), actual_thread_count);
+    std::span<input_osm::Counter<uint64_t>> way_count(all_counters.data() + actual_thread_count, actual_thread_count);
+    std::span<input_osm::Counter<uint64_t>> relation_count(all_counters.data() + 2 * actual_thread_count,
+                                                           actual_thread_count);
+    std::span<input_osm::Counter<uint64_t>> block_count(all_counters.data() + 3 * actual_thread_count,
+                                                        actual_thread_count);
+
+    const bool result = reader.read_blocks(false, [&](const input_osm::pbf_block_t& block) {
+        node_count[input_osm::thread_index] += block.nodes.size();
+        way_count[input_osm::thread_index] += block.ways.size();
+        relation_count[input_osm::thread_index] += block.relations.size();
+        block_count[input_osm::thread_index] += 1;
         return true;
     });
 
@@ -33,10 +45,11 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    fmt::print("blocks={} nodes={} ways={} relations={}\n",
-               fmt::group_digits(blocks),
-               fmt::group_digits(nodes),
-               fmt::group_digits(ways),
-               fmt::group_digits(relations));
+    fmt::print("nodes: {}\n", fmt::group_digits(std::accumulate(node_count.begin(), node_count.end(), 0LLU)));
+    fmt::print("ways: {}\n", fmt::group_digits(std::accumulate(way_count.begin(), way_count.end(), 0LLU)));
+    fmt::print("relations: {}\n",
+               fmt::group_digits(std::accumulate(relation_count.begin(), relation_count.end(), 0LLU)));
+    fmt::print("blocks: {}\n", fmt::group_digits(std::accumulate(block_count.begin(), block_count.end(), 0LLU)));
+
     return EXIT_SUCCESS;
 }
