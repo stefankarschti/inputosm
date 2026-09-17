@@ -1,5 +1,6 @@
-#include <inputosm/inputosm.h>
-#include "pbf_test_data.h"
+#include <inputosm/inputosm.hpp>
+#include "pbf_test_data.hpp"
+#include "pbf_eager_test_view.hpp"
 
 #include <algorithm>
 #include <array>
@@ -30,15 +31,18 @@ void check(bool condition, const char* expression, int line)
 }
 #define CHECK(expression) check(bool(expression), #expression, __LINE__)
 
+bool read_test_blocks(const char* filename, bool metadata, const eager_handler_t& handler)
+{
+    eager_reader_t reader;
+    reader.set_thread_count(input_osm::thread_count());
+    return reader.open(filename) && reader.read_blocks(metadata, handler);
+}
+
 static_assert(std::is_same_v<decltype(tag_t::key), std::string_view>);
 static_assert(std::is_same_v<decltype(relation_member_t::role), std::string_view>);
 static_assert(std::is_same_v<decltype(node_t::tags), std::span<const tag_t>>);
 static_assert(std::is_same_v<decltype(way_t::node_refs), std::span<const int64_t>>);
 static_assert(std::is_same_v<decltype(relation_t::members), std::span<const relation_member_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::nodes), std::span<const node_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::ways), std::span<const way_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::relations), std::span<const relation_t>>);
-static_assert(std::is_same_v<decltype(pbf_block_t::string_table), std::span<const std::string_view>>);
 
 const tag_t* find_tag(std::span<const tag_t> tags, std::string_view key)
 {
@@ -176,10 +180,12 @@ void fixture_test(std::string_view name, size_t count, bool metadata, size_t thr
     size_t calls = 0, last_index = 0;
     uint64_t last_offset = 0;
     const auto caller = std::this_thread::get_id();
-    CHECK(input_pbf_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) {
+    const auto previous_type = file_type;
+    const auto previous_mode = osc_mode;
+    CHECK(read_test_blocks(path.c_str(), metadata, [&](const eager_block_t& block) {
         std::lock_guard lock(mutex);
         CHECK(thread_index < thread_count() && block_index == block.index);
-        CHECK(file_type == file_type_t::pbf && osc_mode == input_osm::mode_t::bulk);
+        CHECK(file_type == previous_type && osc_mode == previous_mode);
         CHECK(block.index > 0 && block.file_offset > 0);
         if (threads == 1)
         {
@@ -225,7 +231,7 @@ void fixture_test(std::string_view name, size_t count, bool metadata, size_t thr
     CHECK(input_file(path.c_str(), metadata, {}, {}, {}));
 }
 
-bool keep_block(const pbf_block_t&)
+bool keep_block(const eager_block_t&)
 {
     return true;
 }
@@ -253,7 +259,7 @@ void layout_test(files_t& files)
         const auto file = initial + skip + data + raw_block("OSMData", table());
         const auto path = files.write(file, ".binary");
         size_t calls = 0;
-        CHECK(input_pbf_blocks(path.c_str(), true, [&](const pbf_block_t& block) {
+        CHECK(read_test_blocks(path.c_str(), true, [&](const eager_block_t& block) {
             if (++calls == 1)
             {
                 CHECK(block.index == 2 && block.file_offset == initial.size() + skip.size());
@@ -307,12 +313,12 @@ void layout_test(files_t& files)
     }
     const auto unknown_group = varint((99u << 3) | 3) + integer(1, 7) + varint((99u << 3) | 4);
     const auto extended = files.write(header() + raw_block("OSMData", primitive(message(1, node())) + unknown_group));
-    CHECK(input_pbf_blocks(extended.c_str(), false, keep_block));
+    CHECK(read_test_blocks(extended.c_str(), false, keep_block));
     const auto split_bbox = raw_block("OSMHeader",
                                       message(4, "OsmSchema-V0.6") + message(1, integer(1, 0) + integer(2, 0)) +
                                           message(1, integer(3, 0) + integer(4, 0)));
     const auto bbox_path = files.write(split_bbox);
-    CHECK(input_pbf_blocks(bbox_path.c_str(), false, keep_block));
+    CHECK(read_test_blocks(bbox_path.c_str(), false, keep_block));
     const auto dense_first = packed(1, {sint(10)}) + packed(8, {sint(100)}) + packed(9, {sint(200)}) +
                              message(5,
                                      integer(1, 2) + integer(2, sint(50)) + integer(3, sint(70)) + integer(5, sint(1)));
@@ -323,7 +329,7 @@ void layout_test(files_t& files)
                                          zlib_block(table({"", "metadata user", "unused"}) +
                                                     message(2, message(2, dense_first) + message(2, dense_second))));
     for (bool metadata : {false, true})
-        CHECK(input_pbf_blocks(split_dense.c_str(), metadata, [&](const pbf_block_t& block) {
+        CHECK(read_test_blocks(split_dense.c_str(), metadata, [&](const eager_block_t& block) {
             CHECK(block.string_table.size() == 3 && block.string_table[1] == "metadata user" &&
                   block.string_table[2] == "unused");
             CHECK(block.nodes.size() == 2 && block.nodes[0].id == 10 && block.nodes[1].id == 9);
@@ -337,7 +343,7 @@ void layout_test(files_t& files)
         }));
     size_t calls = 0;
     const auto only_header = files.write(header());
-    CHECK(input_pbf_blocks(only_header.c_str(), false, [&](const auto&) {
+    CHECK(read_test_blocks(only_header.c_str(), false, [&](const auto&) {
         ++calls;
         return true;
     }));
@@ -455,7 +461,7 @@ void column_test(files_t& files)
                     }
                     return true;
                 };
-                CHECK(input_pbf_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) {
+                CHECK(read_test_blocks(path.c_str(), metadata, [&](const eager_block_t& block) {
                     return nodes(block.nodes) && ways(block.ways) && relations(block.relations);
                 }));
                 CHECK(nodes_seen == 5 && ways_seen == 1 && relations_seen == 1);
@@ -500,7 +506,7 @@ void dense_limits_test(files_t& files)
             }
             return true;
         };
-        CHECK(input_pbf_blocks(path.c_str(), metadata, [&](const pbf_block_t& block) { return nodes(block.nodes); }));
+        CHECK(read_test_blocks(path.c_str(), metadata, [&](const eager_block_t& block) { return nodes(block.nodes); }));
         CHECK(count == 4);
         count = 0;
         CHECK(input_file(path.c_str(), metadata, nodes, {}, {}));
@@ -531,7 +537,7 @@ void growth_test(files_t& files)
             2, message(4, integer(1, group) + message(8, roles) + message(9, refs) + message(10, types) + tags));
     }
     const auto path = files.write(header() + zlib_block(payload));
-    CHECK(input_pbf_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+    CHECK(read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
         CHECK(block.nodes.size() == 3600 && block.ways.size() == 12 && block.relations.size() == 12);
         for (size_t group = 0; group < 12; ++group)
         {
@@ -598,7 +604,7 @@ void compression_test(files_t& files)
         {
             set_thread_count(threads);
             std::atomic<size_t> calls{0};
-            CHECK(input_pbf_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+            CHECK(read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
                 CHECK(block.nodes.size() == 1);
                 const auto index = static_cast<size_t>(block.nodes[0].id - 1);
                 CHECK(index < sizes.size());
@@ -631,7 +637,7 @@ void compression_test(files_t& files)
         {
             set_thread_count(threads);
             std::atomic<size_t> calls{0};
-            CHECK(!input_pbf_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+            CHECK(!read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
                 CHECK(block.nodes.size() == 1 && block.nodes[0].id == 1);
                 ++calls;
                 return true;
@@ -641,7 +647,7 @@ void compression_test(files_t& files)
         }
     }
     const auto incorrect_header = files.write(file_block("OSMHeader", integer(2, 1) + message(3, empty_stream)));
-    CHECK(!input_pbf_blocks(incorrect_header.c_str(), false, keep_block));
+    CHECK(!read_test_blocks(incorrect_header.c_str(), false, keep_block));
 }
 
 void error_test(files_t& files)
@@ -652,12 +658,12 @@ void error_test(files_t& files)
     const auto good_path = files.write(good);
     auto reject = [&](const std::string& bytes) {
         const auto path = files.write(bytes);
-        CHECK(!input_pbf_blocks(path.c_str(), true, keep_block));
-        CHECK(input_pbf_blocks(good_path.c_str(), true, keep_block));
+        CHECK(!read_test_blocks(path.c_str(), true, keep_block));
+        CHECK(read_test_blocks(good_path.c_str(), true, keep_block));
     };
-    CHECK(!input_pbf_blocks(nullptr, false, keep_block));
-    CHECK(!input_pbf_blocks("/inputosm-file-that-does-not-exist", false, keep_block));
-    CHECK(!input_pbf_blocks(good_path.c_str(), false, {}));
+    CHECK(!read_test_blocks(nullptr, false, keep_block));
+    CHECK(!read_test_blocks("/inputosm-file-that-does-not-exist", false, keep_block));
+    CHECK(!read_test_blocks(good_path.c_str(), false, {}));
     reject("<osm version=\"0.6\"/>");
     for (size_t i = 0; i < good.size(); ++i)
         if (i != header().size()) reject(good.substr(0, i));
@@ -716,12 +722,12 @@ void error_test(files_t& files)
     for (const auto& payload : invalid) reject(header() + raw_block("OSMData", payload));
     const auto overflow = files.write(
         header() + raw_block("OSMData", primitive(message(1, node() + message(4, integer(2, uint64_t{1} << 40))))));
-    CHECK(!input_pbf_blocks(overflow.c_str(), true, keep_block));
-    CHECK(input_pbf_blocks(overflow.c_str(), false, keep_block));
+    CHECK(!read_test_blocks(overflow.c_str(), true, keep_block));
+    CHECK(read_test_blocks(overflow.c_str(), false, keep_block));
     size_t callbacks = 0;
     const auto partial = files.write(
         header() + raw_block("OSMData", table() + message(2, message(1, node())) + message(2, message(3, ""))));
-    CHECK(!input_pbf_blocks(partial.c_str(), false, [&](const auto&) {
+    CHECK(!read_test_blocks(partial.c_str(), false, [&](const auto&) {
         ++callbacks;
         return true;
     }));
@@ -734,7 +740,7 @@ void column_error_test(files_t& files)
     auto reject = [&](std::string_view group, bool metadata = true) {
         const auto path = files.write(header() + raw_block("OSMData", primitive(group)));
         size_t calls = 0;
-        CHECK(!input_pbf_blocks(path.c_str(), metadata, [&](const auto&) {
+        CHECK(!read_test_blocks(path.c_str(), metadata, [&](const auto&) {
             ++calls;
             return true;
         }));
@@ -810,7 +816,7 @@ void column_error_test(files_t& files)
         const auto group = message(2, dense_node + message(5, info));
         reject(group);
         const auto path = files.write(header() + raw_block("OSMData", primitive(group)));
-        CHECK(input_pbf_blocks(path.c_str(), false, keep_block));
+        CHECK(read_test_blocks(path.c_str(), false, keep_block));
     }
     for (size_t length = 1; length <= 10; ++length)
     {
@@ -823,7 +829,7 @@ void column_error_test(files_t& files)
         const int64_t id = bits == 63 ? minimum : int64_t{1} << bits;
         const auto path = files.write(header() + raw_block("OSMData", primitive(message(1, node(id)))));
         size_t calls = 0;
-        CHECK(input_pbf_blocks(path.c_str(), true, [&](const pbf_block_t& block) {
+        CHECK(read_test_blocks(path.c_str(), true, [&](const eager_block_t& block) {
             CHECK(block.nodes.size() == 1 && block.nodes[0].id == id);
             ++calls;
             return true;
@@ -838,7 +844,7 @@ void reader_boundary_test(files_t& files)
     auto check_payload = [&](const std::string& payload, bool expected) {
         const auto path = files.write(header() + raw_block("OSMData", payload));
         size_t calls = 0;
-        CHECK(input_pbf_blocks(path.c_str(), true, [&](const auto&) {
+        CHECK(read_test_blocks(path.c_str(), true, [&](const auto&) {
                   ++calls;
                   return true;
               }) == expected);
@@ -892,7 +898,7 @@ void cancellation_test(files_t& files)
     const auto path = files.write(file);
     set_thread_count(1);
     size_t calls = 0;
-    CHECK(!input_pbf_blocks(path.c_str(), false, [&](const auto&) {
+    CHECK(!read_test_blocks(path.c_str(), false, [&](const auto&) {
         ++calls;
         return false;
     }));
@@ -900,10 +906,10 @@ void cancellation_test(files_t& files)
     CHECK(!input_file(path.c_str(), false, [](auto) { return false; }, {}, {}));
     CHECK(!input_file(
         path.c_str(), false, [](auto) -> bool { throw std::runtime_error("Entity callback failure"); }, {}, {}));
-    CHECK(!input_pbf_blocks(
+    CHECK(!read_test_blocks(
         path.c_str(), false, [](const auto&) -> bool { throw std::runtime_error("Callback failure"); }));
-    CHECK(!input_pbf_blocks(path.c_str(), false, [](const auto&) -> bool { throw 1; }));
-    CHECK(input_pbf_blocks(path.c_str(), false, keep_block));
+    CHECK(!read_test_blocks(path.c_str(), false, [](const auto&) -> bool { throw 1; }));
+    CHECK(read_test_blocks(path.c_str(), false, keep_block));
     set_thread_count(2);
     if (thread_count() < 2) return;
     for (bool fail : {false, true})
@@ -912,7 +918,7 @@ void cancellation_test(files_t& files)
         std::condition_variable changed;
         size_t entered = 0, exited = 0;
         const auto caller = std::this_thread::get_id();
-        CHECK(!input_pbf_blocks(path.c_str(), false, [&](const pbf_block_t& block) {
+        CHECK(!read_test_blocks(path.c_str(), false, [&](const eager_block_t& block) {
             std::unique_lock lock(mutex);
             CHECK(std::this_thread::get_id() != caller);
             CHECK(block.nodes[0].id == 1);
@@ -924,15 +930,15 @@ void cancellation_test(files_t& files)
             return false;
         }));
         CHECK(entered == 2 && exited == 2);
-        CHECK(input_pbf_blocks(path.c_str(), false, keep_block));
+        CHECK(read_test_blocks(path.c_str(), false, keep_block));
     }
     for (size_t count : {1, 2, 4})
     {
         set_thread_count(count);
         const auto corrupt = files.write(header() + raw_block("OSMData", "invalid") + data);
-        CHECK(!input_pbf_blocks(corrupt.c_str(), false, keep_block));
+        CHECK(!read_test_blocks(corrupt.c_str(), false, keep_block));
         CHECK(!input_file(corrupt.c_str(), false, {}, {}, {}));
-        CHECK(input_pbf_blocks(path.c_str(), false, keep_block));
+        CHECK(read_test_blocks(path.c_str(), false, keep_block));
     }
 }
 } // namespace

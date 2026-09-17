@@ -1,5 +1,4 @@
-#ifndef INPUTOSM_VERSION_H
-#define INPUTOSM_VERSION_H
+#pragma once
 
 // clang-format off
 
@@ -9,5 +8,3 @@
 #define INPUTOSM_VERSION "@PROJECT_VERSION@"
 
 // clang-format on
-
-#endif // INPUTOSM_VERSION_H

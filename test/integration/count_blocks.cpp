@@ -1,9 +1,12 @@
-#include <inputosm/inputosm.h>
+#include "counter.hpp"
+#include <inputosm/inputosm.hpp>
 
 #include <cstdint>
 #include <cstdlib>
 #include <fmt/format.h>
 #include <cstdio>
+#include <numeric>
+#include <vector>
 
 int main(int argc, char** argv)
 {
@@ -13,17 +16,15 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    input_osm::set_thread_count(1);
-    uint64_t blocks = 0;
-    uint64_t nodes = 0;
-    uint64_t ways = 0;
-    uint64_t relations = 0;
+    input_osm::pbf_reader_t reader;
+    reader.set_max_thread_count();
+    if (!reader.open(argv[1])) return EXIT_FAILURE;
 
-    const bool result = input_osm::input_pbf_blocks(argv[1], false, [&](const input_osm::pbf_block_t& block) {
-        ++blocks;
-        nodes += block.nodes.size();
-        ways += block.ways.size();
-        relations += block.relations.size();
+    // Use one counter for each worker thread.
+    std::vector<input_osm::Counter<uint64_t>> block_count(reader.thread_count());
+
+    const bool result = reader.read_blocks([&](const input_osm::pbf_block_t&) {
+        block_count[input_osm::thread_index] += 1;
         return true;
     });
 
@@ -33,10 +34,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    fmt::print("blocks={} nodes={} ways={} relations={}\n",
-               fmt::group_digits(blocks),
-               fmt::group_digits(nodes),
-               fmt::group_digits(ways),
-               fmt::group_digits(relations));
+    fmt::print("blocks: {}\n", fmt::group_digits(std::accumulate(block_count.begin(), block_count.end(), uint64_t{0})));
+
     return EXIT_SUCCESS;
 }

@@ -19,8 +19,26 @@ target_link_libraries(pbf_block_test PRIVATE inputosm::inputosm libdeflate::libd
 add_test(NAME pbf_block COMMAND pbf_block_test)
 set_tests_properties(pbf_block PROPERTIES LABELS unit TIMEOUT 60)
 
+add_executable(pbf_reader_test pbf_reader_test.cpp)
+target_link_libraries(pbf_reader_test PRIVATE inputosm::inputosm libdeflate::libdeflate_static Threads::Threads)
+if(INPUTOSM_BENCH_INDEPENDENT_MAPS)
+    target_compile_definitions(pbf_reader_test PRIVATE INPUTOSM_BENCH_INDEPENDENT_MAPS)
+endif()
+add_test(NAME pbf_reader COMMAND pbf_reader_test)
+set_tests_properties(pbf_reader PROPERTIES LABELS unit TIMEOUT 60)
+
 add_executable(output_format_test output_format_test.cpp)
 target_include_directories(output_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 target_link_libraries(output_format_test PRIVATE inputosm::inputosm fmt::fmt)
 add_test(NAME output_format COMMAND output_format_test)
 set_tests_properties(output_format PROPERTIES LABELS unit ENVIRONMENT "LC_ALL=inputosm_missing_locale")
+
+add_executable(pbf_deferred_test pbf_deferred_test.cpp)
+target_link_libraries(pbf_deferred_test PRIVATE inputosm::inputosm libdeflate::libdeflate_static Threads::Threads)
+add_test(NAME pbf_deferred COMMAND pbf_deferred_test)
+set_tests_properties(pbf_deferred PROPERTIES LABELS unit TIMEOUT 60)
+
+add_executable(pbf_allocation_test pbf_allocation_test.cpp)
+target_link_libraries(pbf_allocation_test PRIVATE inputosm::inputosm libdeflate::libdeflate_static Threads::Threads)
+add_test(NAME pbf_allocation COMMAND pbf_allocation_test)
+set_tests_properties(pbf_allocation PROPERTIES LABELS unit TIMEOUT 60 SKIP_RETURN_CODE 77)

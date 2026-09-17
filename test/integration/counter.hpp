@@ -1,5 +1,4 @@
-#ifndef _INPUTOSMTESTCOUNTER_H_
-#define _INPUTOSMTESTCOUNTER_H_
+#pragma once
 
 #include <cstdint>
 
@@ -41,5 +40,3 @@ static_assert(sizeof(u32_64B) == 64);
 static_assert(sizeof(i32_64B) == 64);
 
 } // namespace input_osm
-
-#endif // _INPUTOSMTESTCOUNTER_H_

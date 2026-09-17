@@ -1,4 +1,4 @@
-// Copyright 2021-2022 Stefan Karschti
+// Copyright 2021-2026 Stefan Karschti
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -11,13 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <inputosm/inputosm.h>
+#include <inputosm/inputosm.hpp>
 #include <fmt/format.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <numeric>
-#include <map>
+#include <unordered_map>
 #include <cstring>
 #include <vector>
 
@@ -41,27 +41,37 @@ int main(int argc, char **argv)
     };
     std::vector<std::vector<ferry_info>> ferry(input_osm::thread_count());
 
-    if (!input_osm::input_file(
-            path,
-            false,
-            nullptr,
-            [&ferry_count, &ferry](std::span<const input_osm::way_t> way_list) -> bool {
-                for (auto &way : way_list)
+    input_osm::pbf_reader_t reader;
+    reader.set_thread_count(input_osm::thread_count());
+    const bool ok = reader.open(path) && reader.read_blocks([&](const input_osm::pbf_block_t &block) {
+        size_t ways = 0;
+        if (!block.way_count(ways)) return false;
+        if (ways == 0) return true;
+        thread_local std::vector<uint8_t> strings;
+        strings.clear();
+        if (!block.decode_strings([&](std::string_view value) {
+                strings.push_back(uint8_t(value == "route") | (uint8_t(value == "ferry") << 1));
+                return true;
+            }))
+            return false;
+        return block.decode_ways({true, true, false, false}, [&](const input_osm::pbf_way_batch_t &batch) {
+            for (size_t i = 0; i < batch.count; ++i)
+            {
+                for (const auto tag : batch.tags[i])
                 {
-                    for (auto &tag : way.tags)
+                    if (tag.key >= strings.size() || tag.value >= strings.size()) return false;
+                    if ((strings[tag.key] & 1) && (strings[tag.value] & 2))
                     {
-                        if (tag.key == "route" && tag.value == "ferry")
-                        {
-                            ferry_count[input_osm::thread_index]++;
-                            ferry[input_osm::thread_index].emplace_back(ferry_info{
-                                .way_id = way.id,
-                                .node_id = std::vector<int64_t>(way.node_refs.begin(), way.node_refs.end())});
-                        }
+                        ++ferry_count[input_osm::thread_index];
+                        const auto refs = batch.node_refs[i];
+                        ferry[input_osm::thread_index].push_back({batch.ids[i], {refs.begin(), refs.end()}});
                     }
                 }
-                return true;
-            },
-            nullptr))
+            }
+            return true;
+        });
+    });
+    if (!ok)
     {
         fmt::print("Error while processing pbf\n");
         return EXIT_FAILURE;
@@ -73,7 +83,7 @@ int main(int argc, char **argv)
         int64_t raw_longitude;
         int64_t raw_latitude;
     };
-    std::map<int64_t, pos> node_coord;
+    std::unordered_map<int64_t, pos> node_coord;
     for (auto &fv : ferry)
     {
         for (auto &f : fv)
@@ -86,22 +96,21 @@ int main(int argc, char **argv)
     }
     fmt::print("{} unique nodes used by ferries\n", fmt::group_digits(node_coord.size()));
     fmt::print("retrieving ferry node coordinates...\n");
-    if (!input_osm::input_file(
-            path,
-            false,
-            [&node_coord](std::span<const input_osm::node_t> node_list) -> bool {
-                for (auto &node : node_list)
+    // The input must contain one node record for each node ID.
+    // Each worker updates different map elements.
+    if (!reader.read_blocks([&](const input_osm::pbf_block_t &block) {
+            return block.decode_nodes({true, true, true, false, false}, [&](const input_osm::pbf_node_batch_t &batch) {
+                for (size_t i = 0; i < batch.count; ++i)
                 {
-                    auto it = node_coord.find(node.id);
-                    if (node_coord.end() != it)
+                    const auto it = node_coord.find(batch.ids[i]);
+                    if (it != node_coord.end())
                     {
-                        it->second = {.raw_longitude = node.raw_latitude, .raw_latitude = node.raw_latitude};
+                        it->second = {batch.raw_longitudes[i], batch.raw_latitudes[i]};
                     }
                 }
                 return true;
-            },
-            nullptr,
-            nullptr))
+            });
+        }))
     {
         fmt::print("Error while processing pbf\n");
         return EXIT_FAILURE;
