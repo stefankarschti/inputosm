@@ -214,16 +214,19 @@ void fixture_test(std::string_view name, size_t count, bool metadata, size_t thr
         metadata,
         [&](std::span<const node_t> nodes) {
             std::lock_guard lock(mutex);
+            CHECK(!nodes.empty());
             batches.nodes(nodes);
             return true;
         },
         [&](std::span<const way_t> ways) {
             std::lock_guard lock(mutex);
+            CHECK(!ways.empty());
             batches.ways(ways);
             return true;
         },
         [&](std::span<const relation_t> relations) {
             std::lock_guard lock(mutex);
+            CHECK(!relations.empty());
             batches.relations(relations);
             return true;
         }));
@@ -308,8 +311,8 @@ void layout_test(files_t& files)
                 return true;
             }));
         CHECK(node_batches == std::vector<size_t>({1, 2, 1}));
-        CHECK(way_batches == std::vector<size_t>({0, 0, 1, 0, 0}));
-        CHECK(relation_batches == std::vector<size_t>({0, 0, 0, 1, 0}));
+        CHECK(way_batches == std::vector<size_t>({1}));
+        CHECK(relation_batches == std::vector<size_t>({1}));
     }
     const auto unknown_group = varint((99u << 3) | 3) + integer(1, 7) + varint((99u << 3) | 4);
     const auto extended = files.write(header() + raw_block("OSMData", primitive(message(1, node())) + unknown_group));

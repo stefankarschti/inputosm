@@ -647,7 +647,7 @@ struct decoder_t
         require(!has_key, "Missing dense tag value");
         require(!has_tags || node_index == storage.nodes.size(), "Missing dense tag delimiter");
     }
-    bool group(bytes_t bytes)
+    void group(bytes_t bytes)
     {
         for (auto& fields : dense_fields) fields.clear();
         const auto kind = visit_group(bytes, [&](const field_t& field) {
@@ -668,7 +668,6 @@ struct decoder_t
             }
         });
         if (kind == 2) dense();
-        return kind == 1 || kind == 2;
     }
     void prepare(bytes_t bytes)
     {
@@ -1177,11 +1176,12 @@ struct pbf_access_t
             {
                 if (!state.active()) return false;
                 decoder.storage.clear();
-                const bool has_nodes = decoder.group(group);
+                decoder.group(group);
                 decoder.storage.finish();
-                if (has_nodes && nodes && !nodes(decoder.storage.nodes)) return false;
-                if (ways && !ways(decoder.storage.ways)) return false;
-                if (relations && !relations(decoder.storage.relations)) return false;
+                if (nodes && !decoder.storage.nodes.empty() && !nodes(decoder.storage.nodes)) return false;
+                if (ways && !decoder.storage.ways.empty() && !ways(decoder.storage.ways)) return false;
+                if (relations && !decoder.storage.relations.empty() && !relations(decoder.storage.relations))
+                    return false;
             }
             return true;
         });

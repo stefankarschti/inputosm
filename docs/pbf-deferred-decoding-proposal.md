@@ -8,7 +8,8 @@ Review date: 2026-09-17.
 Repository basis: `e49055a`.
 
 This proposal replaces the eager block interface from the [previous reader proposal](pbf-random-access-proposal.md).
-It preserves the `input_file()` interface and its entity callback behavior.
+It preserves the `input_file()` interface and its nonempty entity batches.
+The legacy adapter skips callbacks for empty entity batches.
 The method signatures describe the public interface.
 
 ## 1. Purpose
@@ -581,11 +582,11 @@ The adapter preserves the following order for each primitive group.
 
 | Order | Callback condition |
 | --- | --- |
-| 1 | Call the node handler when the group contains ordinary or dense nodes and that handler exists. |
-| 2 | Call the supplied way handler, including an empty batch. |
-| 3 | Call the supplied relation handler, including an empty batch. |
+| 1 | Call the supplied node handler only when the decoded node batch is nonempty. |
+| 2 | Call the supplied way handler only when the decoded way batch is nonempty. |
+| 3 | Call the supplied relation handler only when the decoded relation batch is nonempty. |
 
-An empty node group retains its empty node callback.
+Empty groups, including empty dense-node groups, cause no legacy entity callbacks.
 A block with no primitive groups has no entity callbacks.
 A failed callback prevents subsequent callbacks for that group.
 The adapter preserves block indexes, thread indexes, and callback context restoration.
@@ -661,7 +662,7 @@ The steps below define the implementation and verification sequence.
 | Nested reads | A different reader can decode within a callback without changing outer views. Same-reader recursion fails. |
 | Failure | Exceptions; callback cancellation; ignored nested failure; unchanged count outputs on failure; reader reuse after failure. |
 | Random access | Scan and offset-table results agree. Header and unknown indexes retain their behavior. Offsets beyond 4 GiB work. |
-| Legacy behavior | Entity values, callback order, empty batches, metadata settings, string lookup checks, parser context, malformed inputs, and XML behavior remain unchanged. |
+| Legacy behavior | Skip empty batches. Preserve entity values, nonempty callback order, metadata settings, string lookup checks, parser context, validation, and XML behavior. |
 | Storage | Allocation counts stabilize after warmup. Closing readers releases mapping references even when TLS capacity remains. |
 
 Use existing fixtures as the compatibility basis.

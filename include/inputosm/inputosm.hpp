@@ -313,6 +313,7 @@ enum class mode_t
 
 void set_verbose(bool value);
 
+/** @brief Read entity batches. Entity handlers receive only nonempty batches. */
 bool input_file(const char* filename,
                 bool decode_metadata,
                 std::function<bool(std::span<const node_t>)> node_handler,
