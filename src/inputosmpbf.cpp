@@ -872,6 +872,8 @@ public:
     mapping_t(const mapping_t&) = delete;
     mapping_t& operator=(const mapping_t&) = delete;
     bytes_t bytes() const { return {data_, size_}; }
+    std::mutex index_mutex;
+    std::shared_ptr<const std::vector<uint64_t>> index;
     bool same_file(const struct stat& other) const
     {
 #if defined(__APPLE__)
@@ -1471,7 +1473,7 @@ size_t effective_threads(size_t count)
 struct pbf_reader_t::impl_t
 {
     std::shared_ptr<mapping_t> mapping;
-    std::vector<uint64_t> offsets;
+    std::shared_ptr<const std::vector<uint64_t>> offsets;
     blob_decoder_t header_storage;
     bytes_t header_bytes;
     bool locations = false;
@@ -1567,11 +1569,11 @@ size_t pbf_reader_t::thread_count() const noexcept
 }
 bool pbf_reader_t::has_index() const noexcept
 {
-    return impl_ && !impl_->offsets.empty();
+    return impl_ && bool(impl_->offsets);
 }
 size_t pbf_reader_t::index_memory_bytes() const noexcept
 {
-    return impl_ ? impl_->offsets.capacity() * sizeof(uint64_t) : 0;
+    return has_index() ? impl_->offsets->capacity() * sizeof(uint64_t) : 0;
 }
 
 bool pbf_reader_t::build_index() noexcept
@@ -1581,6 +1583,12 @@ bool pbf_reader_t::build_index() noexcept
         require(bool(impl_), "PBF reader is closed");
         impl_t::operation_t operation(*impl_);
         if (has_index()) return true;
+        std::lock_guard lock(impl_->mapping->index_mutex);
+        if (impl_->mapping->index)
+        {
+            impl_->offsets = impl_->mapping->index;
+            return true;
+        }
         const auto bytes = impl_->mapping->bytes();
         reader_t reader(bytes);
         std::vector<uint64_t> offsets;
@@ -1593,7 +1601,8 @@ bool pbf_reader_t::build_index() noexcept
             offsets.push_back(offset);
             offset = static_cast<uint64_t>(descriptor.blob.data() - bytes.data()) + descriptor.blob.size();
         }
-        impl_->offsets = std::move(offsets);
+        impl_->mapping->index = std::make_shared<const std::vector<uint64_t>>(std::move(offsets));
+        impl_->offsets = impl_->mapping->index;
         return true;
     }
     catch (const std::exception& error)
@@ -1726,9 +1735,9 @@ bool pbf_reader_t::read_block(size_t index, const pbf_block_handler_t& handler) 
         descriptor_t selected;
         if (has_index())
         {
-            require(index < impl_->offsets.size(), "PBF block index outside file");
-            offset = impl_->offsets[index];
-            const auto end = index + 1 < impl_->offsets.size() ? impl_->offsets[index + 1] : bytes.size();
+            require(index < impl_->offsets->size(), "PBF block index outside file");
+            offset = (*impl_->offsets)[index];
+            const auto end = index + 1 < impl_->offsets->size() ? (*impl_->offsets)[index + 1] : bytes.size();
             reader_t reader(bytes.subspan(static_cast<size_t>(offset), static_cast<size_t>(end - offset)));
             selected = read_descriptor(reader, index, offset);
             require(reader.empty(), "Invalid indexed PBF block range");
